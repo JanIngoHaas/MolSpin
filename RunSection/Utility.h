@@ -17,7 +17,14 @@
 
 namespace RunSection
 {
-    
+
+#pragma region FibSphere
+    typedef std::pair<float, float> FibSpherePoint;
+    FibSpherePoint* CalculatePoints(int n);
+    bool RetrievePoint (std::array<double, 3> &arr, FibSpherePoint* ptr, int num);
+#pragma endregion
+
+#pragma region TimeEvo
     typedef arma::cx_vec (*RungeKuttaFuncArma)(double t, arma::sp_cx_mat &, arma::cx_vec &, arma::cx_vec);
     
     /// Runge-Kutta-Fehlberg method (4th and 5th order) with adaptive time step control
@@ -32,6 +39,8 @@ namespace RunSection
     ///     @param time: Current time (double) - Optional, default = 0
     ///     @return New time step (double)
     double RungeKutta45Armadillo(arma::sp_cx_mat &, arma::cx_vec &, arma::cx_vec &, double, RungeKuttaFuncArma, std::pair<double, double>, double MinTimeStep = 1e-6, double MaxTimeStep = 1e6, double time = 0);
+
+#pragma endregion 
 
 #pragma region BlockMatrixInversionSolvers
     //With these solvers there is the potential for a large amount of matrix fill-in during the solution process.

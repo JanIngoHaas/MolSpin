@@ -11,6 +11,43 @@
 
 namespace RunSection
 {
+
+    FibSpherePoint *CalculatePoints(int n)
+    {
+        FibSpherePoint* TempPointArray = (FibSpherePoint*)malloc(n * sizeof(FibSpherePoint));
+        if(TempPointArray == NULL)
+        {
+            std::cout << "Memory not allocated" << std::endl;
+            return nullptr;
+        }
+
+        double phi = M_PI * (3.0 - std::sqrt(5.0)); //Golden angle in radians
+        for (int i = 0; i < n; i++)
+        {
+            double y = 1.0 - ((double)i / (double)(n-1)) * 2;
+            double theta = phi * (double)i;
+
+            TempPointArray[i] = {y,theta};
+        }
+        return TempPointArray;
+    }
+
+    bool RetrievePoint(std::array<double, 3> &arr, FibSpherePoint* ptr, int num)
+    {
+        FibSpherePoint p =  ptr[num];
+
+        float y = p.first;
+        float theta = p.second;
+        
+        double r = double r = std::sqrt(1.0 - (y * y));
+        double x = std::cos(theta) * r;
+        double y = std::sin(theta) * r;
+
+        arr = {x, y, z};
+        return true;
+    }
+
+
     typedef arma::sp_cx_mat MatrixArma;
     typedef arma::cx_vec VecType;
 
