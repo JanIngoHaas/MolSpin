@@ -27,6 +27,7 @@
 #include <armadillo>
 #include "SpinAPIDefines.h"
 #include "SpinAPIfwd.h"
+#include "ProxyWrapper.h"
 
 namespace SpinAPI
 {
@@ -219,6 +220,7 @@ namespace SpinAPI
 		bool InteractionOperator(const interaction_ptr &, arma::sp_cx_mat &) const; // Returns the matrix representation of the interaction on the spin space (sparse matrix)
 		bool Hamiltonian(arma::cx_mat &) const;										// Total Hamiltonian operator (dense matrix)
 		bool Hamiltonian(arma::sp_cx_mat &) const;									// Total Hamiltonian operator (sparse matrix)
+		bool Hamiltonian()
 		bool StaticHamiltonian(arma::cx_mat &) const;								// Time-independent part of the Hamiltonian operator (dense matrix)
 		bool StaticHamiltonian(arma::sp_cx_mat &) const;							// Time-independent part of the Hamiltonian operator (sparse matrix)
 		bool DynamicHamiltonian(arma::cx_mat &) const;								// Time-dependent part of the Hamiltonian operator (dense matrix)
