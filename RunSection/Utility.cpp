@@ -74,6 +74,51 @@ namespace RunSection
         return container;
     }
 
+    arma::sp_cx_mat GetHamiltonian(const arma::sp_cx_mat H0, int S, const std::vector<arma::sp_cx_mat> HSC, std::vector<std::vector<int>> samples)
+    {
+        int Dimension = H0.n_rows / S;
+        arma::sp_cx_mat H(H0.size());
+        for (int i = 0; i < S; i++)
+        {
+           int interactions = samples[i].size();
+           for (int e = 0; e < interactions; e++)
+           {
+                int col = samples[i][e] * Dimension;
+                int row = e * Dimension;
+
+                arma::sp_cx_mat sample = HSC[i].submat(row, col, row + Dimension - 1, col + Dimension -1);
+                H.submat(i * Dimension, i * Dimension, (i+1)*Dimension -1, (i+1)*Dimension -1);
+           } 
+        }
+        return H;
+    }
+
+    std::vector<SampleCombination> GenerateCombinationsNI(const std::vector<std::vector<int>> orientations &, int startpoint, int endpoint)
+    {
+        int num = 1;
+        std::vector<int> steps;
+        std::vector<int> samples;
+        int total = 0;
+        int samplelength = 0;
+        for(int i = 0; i < orientations.size(); i++)
+        {
+            samplelength += orientations[i].size();
+            for(int e = 0; i < orientations[i].size(); e++)
+            {
+                num = num * orientations[i][e];
+                steps.push_back(orientations[i][e]);
+                for(int a = 0; orientations[i][e]; a++)
+                {
+                    samples.push_back(total + a);
+                }
+                total += steps[-1];
+            }
+        }
+
+        //generate num samples of length samplelength
+        
+    }
+
     typedef arma::sp_cx_mat MatrixArma;
     typedef arma::cx_vec VecType;
 
