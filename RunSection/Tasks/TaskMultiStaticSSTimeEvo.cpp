@@ -112,7 +112,8 @@ namespace RunSection
 				this->Log() << "ERROR: Failed to obtain the superspace Hamiltonian for spin system \"" << i->first->Name() << "\"!" << std::endl;
 				return false;
 			}
-			L.submat(nextDimension, nextDimension, nextDimension + i->second->SpaceDimensions() - 1, nextDimension + i->second->SpaceDimensions() - 1) = arma::cx_double(0.0, -1.0) * H;
+			SCData DataStruct = GetHamiltonian(H,i->second->SpaceDimensions());
+			L.submat(nextDimension, nextDimension, nextDimension + i->second->SpaceDimensions() - 1, nextDimension + i->second->SpaceDimensions() - 1) = arma::cx_double(0.0, -1.0) * DataStruct.H;
 
 			// Then get the reaction operators
 			arma::sp_cx_mat K;

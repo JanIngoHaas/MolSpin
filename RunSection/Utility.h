@@ -24,6 +24,17 @@ namespace RunSection
     bool RetrievePoint (std::array<double, 3> &arr, FibSpherePoint* ptr, int num);
 #pragma endregion
 
+#pragma region SemiClassical
+    struct SCData
+    {
+        arma::sp_cx_mat H; //Hamiltonian
+        arma::sp_cx_mat SamplesMatrix; 
+        
+        std::vector<int> samples;
+        int BlockSize; 
+    };
+    SCData GetHamiltonian(arma::sp_cx_mat&, int);
+#pragma endregion
 #pragma region TimeEvo
     typedef arma::cx_vec (*RungeKuttaFuncArma)(double t, arma::sp_cx_mat &, arma::cx_vec &, arma::cx_vec);
     

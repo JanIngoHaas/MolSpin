@@ -1,3 +1,4 @@
+#include "SpinSpace.h"
 /////////////////////////////////////////////////////////////////////////
 // SpinSpace class (SpinAPI Module)
 // ------------------
@@ -567,7 +568,6 @@ namespace SpinAPI
 					double z = NuclearSpinVector[2];
 
 					SampleTmp = B0 * Sx * x + B0 * Sy * y + B0 * Sz * z;
-					std::cout << SampleTmp << std::endl;
 					tmp.submat(0,currentcol,this->HilbertSpaceDimensions()-1,currentcol+this->HilbertSpaceDimensions()-1) = SampleTmp;
 					currentcol += this->HilbertSpaceDimensions();
 				}
@@ -630,7 +630,6 @@ namespace SpinAPI
 			// We already have the result in the dense matrix to the Hamiltonian at the given time or trajectorye Hilbert space
 			_out = tmp;
 		}
-		std::cout << _out << std::endl;
 		return true;
 	}
 
@@ -677,12 +676,22 @@ namespace SpinAPI
 			return true;
 		}
 
+		bool semiclassical = false;
 		// Get the first interaction contribution
 		auto i = this->interactions.cbegin();
 		arma::sp_cx_mat tmp;
 		arma::sp_cx_mat result;
-		if (!this->InteractionOperator((*i), result))
-			return false;
+		std::vector<interaction_ptr> SemiClassicalInteractions = {};
+		if((*i)->Type() == InteractionType::SemiClassicalField)
+		{
+			SemiClassicalInteractions.push_back((*i));
+			semiclassical = true;
+		}
+		else
+		{
+			if (!this->InteractionOperator((*i), result))
+				return false;
+		}
 
 		// We have already used the first interaction
 		i++;
@@ -690,18 +699,86 @@ namespace SpinAPI
 		// Loop through the rest
 		for (; i != this->interactions.cend(); i++)
 		{
+			if((*i)->Type() == InteractionType::SemiClassicalField)
+			{
+				SemiClassicalInteractions.push_back((*i));
+				semiclassical = true;
+				continue;
+			}
 			// Attempt to get the matrix representing the Interaction object in the spin space
 			if (!this->InteractionOperator((*i), tmp))
 				return false;
 			result += tmp;
 		}
 
-		_out = result;
+		arma::sp_cx_mat SCout;
+		if(semiclassical)
+		{
+			if (!SemiClassicalHamiltonian(SCout,SemiClassicalInteractions))
+				return false;
+		}
+		int width,height =0; 
+		width = SCout.n_cols;
+		height = SCout.n_rows;
+		int Block1h, Block1w = 0;
+		Block1h = result.n_rows;
+		Block1w = result.n_cols;
+		_out = arma::sp_cx_mat(Block1h+height, (width > Block1w) ? width : Block1w);
+		_out.submat(0,0,Block1h-1,Block1w -1) = result;
+		if(SCout.n_nonzero != 0)
+			_out.submat(Block1h, 0, Block1h+height-1,width-1) = SCout;
+		std::cout << _out << std::endl;
 		return true;
 	}
 
+    bool SpinSpace::SemiClassicalHamiltonian(arma::sp_cx_mat & _out, std::vector<interaction_ptr>& interactions) const
+	{
+		arma::sp_cx_mat tmp;
+		arma::sp_cx_mat result;
+
+		//obtain number of orientations per each interaction
+		int samples = interactions.size();
+		int* ori = (int*)malloc(samples * sizeof(int));
+		for (auto i = interactions.begin(); i != interactions.cend(); i++)
+		{
+			ori[i-interactions.begin()] = (*i)->Orientations();
+		}
+		int MaxOri = 0;
+		for (int i = 0; i < samples; i++)
+		{
+			if (ori[i] > MaxOri)
+			{
+				MaxOri = ori[i];
+			}
+		}
+		int operatorspace = 0;
+		if (this->useSuperspace)
+			operatorspace = this->HilbertSpaceDimensions() * this->HilbertSpaceDimensions();
+		else
+			operatorspace = this->HilbertSpaceDimensions();
+		result = arma::sp_cx_mat(samples * operatorspace, MaxOri * operatorspace);
+
+		int op = 0;
+		for(auto i = interactions.begin(); i != interactions.cend(); i++)
+		{
+			if(!this->InteractionOperator((*i), tmp))
+			{
+				return false;
+			}
+			std::cout << op * operatorspace << " , " << ori[op] * operatorspace - 1 << std::endl;
+			result.submat(op * operatorspace, 0, (op+1)*operatorspace -1, ori[op] * operatorspace - 1) = tmp;
+			op += 1;
+			std::cin.get();
+		}
+		_out = result;
+
+		free(ori);
+        return true;
+    }
+	
+	
 	// Sets the dense matrix to the part of the Hamiltonian that is independent of time or trajectory step
-	bool SpinSpace::StaticHamiltonian(arma::cx_mat &_out) const
+    bool SpinSpace::StaticHamiltonian(arma::cx_mat &_out) const
 	{
 		// If we don't have any interactions, the Hamiltonian is zero
 		arma::cx_mat result = arma::zeros<arma::cx_mat>(this->SpaceDimensions(), this->SpaceDimensions());

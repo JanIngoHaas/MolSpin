@@ -49,6 +49,30 @@ namespace RunSection
         return true;
     }
 
+    SCData GetHamiltonian(arma::sp_cx_mat& CompositeMatrix, int Dimension)
+    {
+        SCData container;
+        arma::sp_cx_mat H = CompositeMatrix.submat(0,0,Dimension-1,Dimension-1);
+        arma::sp_cx_mat SampleMatrix = CompositeMatrix.submat(Dimension,0,CompositeMatrix.n_rows-1,CompositeMatrix.n_cols-1);
+        for (int i = 0; i < CompositeMatrix.n_rows; i += Dimension)
+        {
+            int samples = 0;
+            for (int e = 0; e < CompositeMatrix.n_cols; e+= Dimension)
+            {
+                arma::sp_cx_mat SubMat = CompositeMatrix.submat(i,e,i+Dimension-1,e+Dimension-1);
+                if(SubMat.n_nonzero == 0)
+                    break;
+                
+                samples += 1;
+            }
+            container.samples.push_back(samples);
+        }
+        container.H = H;
+        container.SamplesMatrix = SampleMatrix;
+        container.BlockSize = Dimension;
+        
+        return container;
+    }
 
     typedef arma::sp_cx_mat MatrixArma;
     typedef arma::cx_vec VecType;
