@@ -65,6 +65,10 @@ namespace RunSection
 		arma::cx_vec rho0(dimensions);
 		unsigned int nextDimension = 0; // Keeps track of the dimension where the next spin space starts
 
+		std::vector<std::vector<int>> test = {{10,5,10},{5,10}};
+		GenerateCombinationsNI(test,145);
+		std::cin.get();
+
 		// Loop through the systems again to fill this matrix and vector
 		for (auto i = spaces.cbegin(); i != spaces.cend(); i++)
 		{

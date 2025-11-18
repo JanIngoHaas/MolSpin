@@ -77,7 +77,7 @@ namespace RunSection
     arma::sp_cx_mat GetHamiltonian(const arma::sp_cx_mat H0, int S, const std::vector<arma::sp_cx_mat> HSC, std::vector<std::vector<int>> samples)
     {
         int Dimension = H0.n_rows / S;
-        arma::sp_cx_mat H(H0.size());
+        arma::sp_cx_mat H(H0.n_rows, H0.n_cols);
         for (int i = 0; i < S; i++)
         {
            int interactions = samples[i].size();
@@ -93,29 +93,87 @@ namespace RunSection
         return H;
     }
 
-    std::vector<SampleCombination> GenerateCombinationsNI(const std::vector<std::vector<int>> orientations &, int startpoint, int endpoint)
+    std::vector<SampleCombination> GenerateCombinationsNI(const std::vector<std::vector<int>>& orientations , int startpoint, int endpoint)
     {
         int num = 1;
         std::vector<int> steps;
-        std::vector<int> samples;
-        int total = 0;
+        std::vector<int> NumInteractionsPerSpinSystem;
+        std::vector<SampleCombination> samples;
         int samplelength = 0;
         for(int i = 0; i < orientations.size(); i++)
         {
             samplelength += orientations[i].size();
-            for(int e = 0; i < orientations[i].size(); e++)
+            NumInteractionsPerSpinSystem.push_back(orientations[i].size());
+            for(int e = 0; e < orientations[i].size(); e++)
             {
-                num = num * orientations[i][e];
                 steps.push_back(orientations[i][e]);
-                for(int a = 0; orientations[i][e]; a++)
-                {
-                    samples.push_back(total + a);
-                }
-                total += steps[-1];
+                num = num * steps[samplelength-orientations[i].size()+e];
             }
         }
 
         //generate num samples of length samplelength
+        std::vector<int> Combination;
+        for(int i = 0; i < samplelength; i++)
+        {
+            Combination.push_back(0);
+        }
+        int depth = steps.size();
+        Combination[depth-1] = -1;
+        if(endpoint == 0)
+        {
+            endpoint = num;
+        }
+        if(startpoint != 0)
+        {
+            //calculate start combination
+            std::vector<int> remainders = {};
+            int r = startpoint % steps[depth-1];
+            remainders.insert(remainders.begin(),r);
+            int temp = startpoint - r;
+            int m = temp / steps[depth-1];
+            for (int i = depth-2; i >= 0; i--)
+            {
+                r = m % steps[i];
+                temp = m - r;
+                remainders.insert(remainders.begin(),r);
+                m = temp / steps[i];
+            }
+            Combination = remainders;
+        }
+        for (int i = startpoint+1; i < endpoint; i++)
+        {
+            Combination[depth-1] += 1;
+            for (int e = depth-2; e >= 0; e--)
+            {
+                if(Combination[e+1] == steps[e+1])
+                {
+                    Combination[e] += 1;
+                    Combination[e+1] = 0;
+                    continue;
+                }
+            }
+
+            for(int e = 0; e < Combination.size(); e++)
+            {
+                std::cout << Combination[e] << ",";
+            }
+            std::cout << std::endl;
+
+            int s = 0;
+            SampleCombination s1;
+            for(int a = 0; a < NumInteractionsPerSpinSystem.size(); a++)
+            {
+                std::vector<int> temp;
+                for(int e = 0; e < NumInteractionsPerSpinSystem[a]; e++)
+                {
+                    temp.push_back(Combination[e+s]);
+                }
+                s1.push_back(temp);
+                s += NumInteractionsPerSpinSystem[a];
+            }
+            samples.push_back(s1);
+        }
+        return samples;
         
     }
 
