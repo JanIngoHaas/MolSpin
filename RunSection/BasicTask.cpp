@@ -21,7 +21,8 @@
 
 namespace RunSection
 {
-	// -----------------------------------------------------
+
+    // -----------------------------------------------------
 	// BasicTask Constructors and Destructor
 	// -----------------------------------------------------
 	BasicTask::BasicTask(const MSDParser::ObjectParser &_properties, const RunSection &_runsection) : properties(std::make_shared<MSDParser::ObjectParser>(_properties)), runsection(_runsection), output(),
@@ -236,6 +237,23 @@ namespace RunSection
 			return;
 		}
 		this->prop = Propagator::Default;
+    }
+
+	void BasicTask::GetSamples(std::vector<arma::sp_cx_mat>& H, arma::sp_cx_mat& A, std::vector<SCData>& ori)
+    {
+		std::vector<SampleCombination> Combinations; 
+		std::vector<std::vector<int>> samples;
+		std::vector<arma::sp_cx_mat> sampleHSC;
+		for(auto i : ori)
+		{
+			samples.push_back(i.samples);
+			sampleHSC.push_back(i.SamplesMatrix);
+		}
+		Combinations = GenerateCombinationsNI(samples);
+		for(int i = 0; i < Combinations.size(); i++)
+		{
+			H.push_back(GetHamiltonian(A,ori.size(),sampleHSC,Combinations[i]));
+		}
     }
 
     // Method that provides access to the calculation settings

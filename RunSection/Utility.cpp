@@ -54,12 +54,12 @@ namespace RunSection
         SCData container;
         arma::sp_cx_mat H = CompositeMatrix.submat(0,0,Dimension-1,Dimension-1);
         arma::sp_cx_mat SampleMatrix = CompositeMatrix.submat(Dimension,0,CompositeMatrix.n_rows-1,CompositeMatrix.n_cols-1);
-        for (int i = 0; i < CompositeMatrix.n_rows; i += Dimension)
+        for (int i = 0; i < CompositeMatrix.n_rows - Dimension; i += Dimension)
         {
             int samples = 0;
             for (int e = 0; e < CompositeMatrix.n_cols; e+= Dimension)
             {
-                arma::sp_cx_mat SubMat = CompositeMatrix.submat(i,e,i+Dimension-1,e+Dimension-1);
+                arma::sp_cx_mat SubMat = SampleMatrix.submat(i,e,i+Dimension-1,e+Dimension-1);
                 if(SubMat.n_nonzero == 0)
                     break;
                 
@@ -77,7 +77,7 @@ namespace RunSection
     arma::sp_cx_mat GetHamiltonian(const arma::sp_cx_mat H0, int S, const std::vector<arma::sp_cx_mat> HSC, std::vector<std::vector<int>> samples)
     {
         int Dimension = H0.n_rows / S;
-        arma::sp_cx_mat H(H0.n_rows, H0.n_cols);
+        arma::sp_cx_mat H = H0;
         for (int i = 0; i < S; i++)
         {
            int interactions = samples[i].size();
@@ -87,7 +87,7 @@ namespace RunSection
                 int row = e * Dimension;
 
                 arma::sp_cx_mat sample = HSC[i].submat(row, col, row + Dimension - 1, col + Dimension -1);
-                H.submat(i * Dimension, i * Dimension, (i+1)*Dimension -1, (i+1)*Dimension -1);
+                H.submat(i * Dimension, i * Dimension, (i+1)*Dimension -1, (i+1)*Dimension -1) += sample;
            } 
         }
         return H;
@@ -139,8 +139,9 @@ namespace RunSection
                 m = temp / steps[i];
             }
             Combination = remainders;
+            startpoint +=1;
         }
-        for (int i = startpoint+1; i < endpoint; i++)
+        for (int i = startpoint; i < endpoint; i++)
         {
             Combination[depth-1] += 1;
             for (int e = depth-2; e >= 0; e--)

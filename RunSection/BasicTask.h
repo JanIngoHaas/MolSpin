@@ -26,6 +26,7 @@
 #include "MSDParserfwd.h"
 #include "SpinAPIfwd.h"
 #include "ActionTarget.h"
+#include "Utility.h"
 
 namespace RunSection
 {
@@ -80,6 +81,9 @@ namespace RunSection
 		bool Vector(std::string _name, ActionVector **_vector = nullptr);
 
 		Propagator prop;
+		
+		//semi classical 
+		virtual void GetSamples(std::vector<arma::sp_cx_mat>&, arma::sp_cx_mat& A, std::vector<SCData>&);
 
 	public:
 		// Constructors / Destructors

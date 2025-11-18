@@ -26,23 +26,23 @@ SpinSystem system1
 		tensor = isotropic("0.4070");
 	}
 
-	Spin FADH6
-	{
-		spin = 1/2;
-		tensor = matrix("-0.2569 -0.1273 0.0;-0.1273 -0.4711 0.0;0.0 0.0 -0.4336");
-	}
-
-	Spin FADN5
-	{
-		spin = 1;
-		tensor = matrix("-0.0989 0.0039 0.0;0.0039 -0.0881 0.0;0.0 0.0 1.7569");
-	}
-
-	Spin FADN10
-	{
-		spin = 1;
-		tensor = matrix("-0.0190 -0.0048 0.0;-0.0048 -0.0196 0.0;0.0 0.0 0.6046");
-	}
+	//Spin FADH6
+	//{
+	//	spin = 1/2;
+	//	tensor = matrix("-0.2569 -0.1273 0.0;-0.1273 -0.4711 0.0;0.0 0.0 -0.4336");
+	//}
+//
+	//Spin FADN5
+	//{
+	//	spin = 1;
+	//	tensor = matrix("-0.0989 0.0039 0.0;0.0039 -0.0881 0.0;0.0 0.0 1.7569");
+	//}
+//
+	//Spin FADN10
+	//{
+	//	spin = 1;
+	//	tensor = matrix("-0.0190 -0.0048 0.0;-0.0048 -0.0196 0.0;0.0 0.0 0.6046");
+	//}
 
 	// -------------------------
 	// Zeeman interaction
@@ -68,32 +68,40 @@ SpinSystem system1
 		tensor = isotropic(1);
 	} 
 
-        Interaction radical1hyperfineFADH6
-        {
-		prefactor = 0.001;
-                type = hyperfine;
-                group1 = RPElectron1;
-                group2 = FADH6;
-		tensor = isotropic(1);
-        }
+        //Interaction radical1hyperfineFADH6
+        //{
+		//prefactor = 0.001;
+        //        type = hyperfine;
+        //        group1 = RPElectron1;
+        //        group2 = FADH6;
+		//tensor = isotropic(1);
+        //}
+//
+        //Interaction radical1hyperfineFADN5
+        //{
+		//prefactor = 0.001;
+        //        type = hyperfine;
+        //        group1 = RPElectron1;
+        //        group2 = FADN5;
+		//tensor = isotropic(1);
+        //}
+ //
+//
+        //Interaction radical1hyperfineFADN10
+        //{
+		//prefactor = 0.001;
+        //        type = hyperfine;
+        //        group1 = RPElectron1;
+        //        group2 = FADN10;
+        //}
 
-        Interaction radical1hyperfineFADN5
-        {
-		prefactor = 0.001;
-                type = hyperfine;
-                group1 = RPElectron1;
-                group2 = FADN5;
-		tensor = isotropic(1);
-        }
- 
-
-        Interaction radical1hyperfineFADN10
-        {
-		prefactor = 0.001;
-                type = hyperfine;
-                group1 = RPElectron1;
-                group2 = FADN10;
-        }
+	Interaction test
+	{
+		type = semiclassicalfield;
+		group1 = RPElectron1;
+		HyperfineField = "[2,10,1/2],[3,5,1]";
+		orientations = 50;
+	}
 
 	// -------------------------
 	// Spin States

@@ -99,13 +99,17 @@ namespace SpinAPI
 			{
 				this-> type = InteractionType::SemiClassicalField;
 
-				double inamplitudevalue = 0.0; 
-				int inorientationsvalue = 0;
-				this->Properties()->Get("hfiamplitude", inamplitudevalue);
-				this->Properties()->Get("orientations", inorientationsvalue);
-
-				this->hfiamplitude = inamplitudevalue;
-				this->orientations = inorientationsvalue;
+				//arma::cx_vec inamplitudevalue;
+				//arma::cx_vec inspin
+				//int inorientationsvalue;
+				//this->Properties()->Get("hfiamplitude", inamplitudevalue);
+				//this->Properties()->Get("orientations", inorientationsvalue);
+//
+				//this->hfiamplitude = inamplitudevalue;
+				//this->orientations = inorientationsvalue;
+				std::vector<double> HFfield;
+				this->Properties()->GetList("hyperfinefield",HFfield,',');
+				std::cin.get();
 			}
 
 		}

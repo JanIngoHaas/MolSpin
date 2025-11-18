@@ -727,7 +727,6 @@ namespace SpinAPI
 		_out.submat(0,0,Block1h-1,Block1w -1) = result;
 		if(SCout.n_nonzero != 0)
 			_out.submat(Block1h, 0, Block1h+height-1,width-1) = SCout;
-		std::cout << _out << std::endl;
 		return true;
 	}
 
@@ -765,10 +764,8 @@ namespace SpinAPI
 			{
 				return false;
 			}
-			std::cout << op * operatorspace << " , " << ori[op] * operatorspace - 1 << std::endl;
 			result.submat(op * operatorspace, 0, (op+1)*operatorspace -1, ori[op] * operatorspace - 1) = tmp;
 			op += 1;
-			std::cin.get();
 		}
 		_out = result;
 

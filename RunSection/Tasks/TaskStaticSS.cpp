@@ -14,6 +14,7 @@
 #include "SpinSpace.h"
 #include "SpinSystem.h"
 #include "ObjectParser.h"
+#include "Utility.h"
 
 namespace RunSection
 {
@@ -176,9 +177,12 @@ namespace RunSection
 				continue;
 			}
 
-			// Get a matrix to collect all the terms (the total Liouvillian)
-			arma::sp_cx_mat A = arma::cx_double(0.0, -1.0) * H;
+			//code needed for the semi-classical interaction
+			SCData DataStruct = GetHamiltonian(H,space.SpaceDimensions());
+			arma::sp_cx_mat A = arma::cx_double(0.0, -1.0) * DataStruct.H;
 
+
+			// Get a matrix to collect all the terms (the total Liouvillian)
 			// Get the reaction operators, and add them to "A"
 			arma::sp_cx_mat K;
 			if (!space.TotalReactionOperator(K))
@@ -199,9 +203,38 @@ namespace RunSection
 			}
 
 			// Perform the calculation
+
+			//code needed for the semi-classical interaction
+			bool SC = false;
+			std::vector<std::pair<int,arma::cx_vec>> SCresults;
+			std::vector<arma::sp_cx_mat> As;
+			if(DataStruct.SamplesMatrix.n_nonzero != 0)
+			{
+				SC = true;
+				std::vector<SCData> SysData = {DataStruct};
+				GetSamples(As,A,SysData);
+			}
+
 			this->Log() << "Ready to perform calculation." << std::endl;
+
+			if(SC)
+			{
+				#pragma omp parallel for
+				for (int i = 0; i < As.size(); i++)
+				{
+					arma::cx_vec result = solve(arma::conv_to<arma::cx_mat>::from(As[i]), rho0vec);
+					#pragma omp critical
+					SCresults.push_back({i,result});
+				}
+
+				std::cout << SCresults[0].second << std::endl;
+			}
+
+			
 			arma::cx_vec result = solve(arma::conv_to<arma::cx_mat>::from(A), rho0vec);
 			this->Log() << "Done with calculation." << std::endl;
+
+			std::cout << result << std::endl;
 
 			// Convert the resulting density operator back to its Hilbert space representation
 			if (!space.OperatorFromSuperspace(result, rho0))

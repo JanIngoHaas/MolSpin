@@ -33,7 +33,7 @@ namespace RunSection
         std::vector<int> samples;
         int BlockSize; 
     };
-    SCData GetHamiltonian(arma::sp_cx_mat&, int);
+    SCData GetHamiltonian(arma::sp_cx_mat&, int); //rename function so not to confuse
     ///Function to gernerate the sampled hamiltonian
     /// @param H0: the base hamiltonian without the sampled semi classical operator
     /// @param S: number of spin systems
@@ -44,6 +44,7 @@ namespace RunSection
     typedef std::vector<std::vector<int>> SampleCombination;
     std::vector<SampleCombination> GenerateCombinationsNI(const std::vector<std::vector<int>>&, int startpoint = 0, int endpont = 0); //non independent spin systems 
     //std::vector<std::vector<int>> GenerateCombinationsI(const std::vector<std::vector<int>>&); //independent spin systems
+
 #pragma endregion
 #pragma region TimeEvo
     typedef arma::cx_vec (*RungeKuttaFuncArma)(double t, arma::sp_cx_mat &, arma::cx_vec &, arma::cx_vec);
