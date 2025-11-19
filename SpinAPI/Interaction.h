@@ -21,7 +21,12 @@
 
 namespace SpinAPI
 {
-
+	typedef std::tuple<double,int,double> SCHyperfineField;
+	enum class SCDistribution
+	{
+		FJC = 0, //Freely jointed chain
+		DEFUALT //is FJC
+	};
 	class Interaction
 	{
 	private:
@@ -78,9 +83,10 @@ namespace SpinAPI
 		bool tdPrintField;
 
 		//Special data members for Semi-Classical
-		double hfiamplitude;			// Isotropic Hyperfine interaction
-		int orientations;				// Number of points on the fibonacci sphere 
-		double sqn; 					// Spin Quantum Number
+		std::vector<SCHyperfineField> hffield;
+		unsigned int orientations;
+		std::vector<double> BondLengths;
+		SCDistribution dist;
 
 		// Special data members for random number generation
 		int tdSeed;
@@ -135,9 +141,10 @@ namespace SpinAPI
 		const arma::vec Field() const;
 		const double Dvalue() const;
 		const double Evalue() const;
-		const double Hfiamplitude() const;
+		//const double Hfiamplitude() const;
+		const std::vector<SCHyperfineField> Hfiamplitude() const;
 		const int Orientations() const;
-		const double SpinQuantumNumber() const { return this->sqn; };
+		const std::vector<double> VL() const { return this->BondLengths; }
 		bool HasFieldTimeDependence() const;
 		bool HasTensorTimeDependence() const;
 		bool HasTimeDependence() const;
@@ -184,7 +191,7 @@ namespace SpinAPI
 	bool CheckActionScalarInteractionPrefactor(const double &);
 
 	//semi classical distributions
-    void FreelyJointedPolymerBL(); //length of the nuclear spin vector
+    void FreelyJointedPolymerBL(std::vector<double>&, std::vector<SCHyperfineField>& ); //length of the nuclear spin vector
     void FreelyJointedPolymerD(); //Distribution of the nuclear spin vector
 }
 

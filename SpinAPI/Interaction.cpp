@@ -99,18 +99,110 @@ namespace SpinAPI
 			{
 				this-> type = InteractionType::SemiClassicalField;
 
-				//arma::cx_vec inamplitudevalue;
-				//arma::cx_vec inspin
-				//int inorientationsvalue;
-				//this->Properties()->Get("hfiamplitude", inamplitudevalue);
-				//this->Properties()->Get("orientations", inorientationsvalue);
-//
-				//this->hfiamplitude = inamplitudevalue;
-				//this->orientations = inorientationsvalue;
-				std::vector<double> HFfield;
-				this->Properties()->GetList("hyperfinefield",HFfield,',');
-				std::cin.get();
+				int inorientationsvalue;
+				this->Properties()->Get("orientations", inorientationsvalue);
+				this->orientations = inorientationsvalue;
+				std::string HFfieldStr;
+				this->Properties()->Get("hyperfinefield",HFfieldStr);
+				std::vector<std::tuple<double,int,double>> HFfield;
+				bool InTuple = false;
+				int element = 0;
+				std::string CurrentString;
+				std::tuple<double,int,double> CurrentTuple = {-1.0, -1, -1.0};
+				auto c = HFfieldStr.begin();
+				while(c != HFfieldStr.end())
+				{
+					if((*c) == '(' || (*c) == ')')
+					{
+						InTuple = !InTuple;
+						if(!InTuple && CurrentString != "")
+						{
+							c = c - 1;
+							(*c) = ',';
+							InTuple = true;
+							continue;
+						}
+						CurrentString == "";
+						if(!InTuple && element < 3)
+						{
+							std::cout << "[INFO]: Not enough elements in hyperfine field definition for the semi classical interaction." << this->Name();
+							auto[a,n,s] = CurrentTuple;
+							std::cout << " Ignoring the field defined as: " << a << " , " << n << " , " << s << ". -1 is just used as a placeholder value " << std::endl;
+							CurrentTuple = {-1.0,-1,-1.0};
+						}
+						if(!InTuple && element == 3)
+						{
+							HFfield.push_back(CurrentTuple);
+							CurrentTuple = {-1.0,-1,-1.0};
+						}
+						element = 0;
+						c++;
+						continue;
+					}
+					if(!InTuple && (*c) == ',')
+					{
+						c++;
+						continue;
+					}
+					if(InTuple && ((*c) != ',' && (*c) != ' '))
+					{
+						CurrentString += (*c);
+						c++;
+						continue;
+					}
+					if(InTuple && (*c) == ',')
+					{
+						//evaluate string
+						if(element == 0)
+						{
+							double ampl = std::stod(CurrentString);
+							std::get<0>(CurrentTuple) = ampl;
+						}
+						else if(element == 1)
+						{
+							int num = std::stoi(CurrentString);
+							std::get<1>(CurrentTuple) = num;
+						}
+						else if(element == 2)
+						{
+							double sn = std::stod(CurrentString);
+							std::get<2>(CurrentTuple) = sn;
+						}
+						else
+						{
+							std::cout << "[INFO]: Too many elements in hyperfine field definition for the semi classical interaction " << this->Name() << " ignoring value: " << CurrentString << std::endl;
+						}
+						CurrentString = "";
+						element += 1;
+						c++;
+						continue;
+					}
+					c++;
+					 
+				}
+				this->hffield = HFfield;
+
+				std::string distribution;  //slighty overkill as we only have one distribution 
+				if(!this->Properties()->Get("distribution",distribution) && !this->Properties()->Get("dist", distribution))
+				{
+					this->dist = SCDistribution::DEFUALT;
+				}
+				else
+				{
+					if(distribution == "fjc" || distribution == "freelyjointedchain")
+					{
+						this->dist = SCDistribution::FJC;
+					}
+					else
+					{
+						this->dist = SCDistribution::DEFUALT; 
+					}
+				}
+
+				if(this->dist == SCDistribution::FJC || this->dist == SCDistribution::DEFUALT)
+					FreelyJointedPolymerBL(this->BondLengths,this->hffield);
 			}
+
 
 		}
 
@@ -384,7 +476,7 @@ namespace SpinAPI
 		}
 	}
 
-	Interaction::Interaction(const Interaction &_interaction) : properties(_interaction.properties), couplingTensor(_interaction.couplingTensor), field(_interaction.field), dvalue(_interaction.dvalue), evalue(_interaction.evalue), hfiamplitude(_interaction.hfiamplitude), orientations(_interaction.orientations),
+	Interaction::Interaction(const Interaction &_interaction) : properties(_interaction.properties), couplingTensor(_interaction.couplingTensor), field(_interaction.field), dvalue(_interaction.dvalue), evalue(_interaction.evalue), hffield(_interaction.hffield), orientations(_interaction.orientations),
 																group1(_interaction.group1), group2(_interaction.group2), type(_interaction.type), fieldType(_interaction.fieldType),
 																prefactor(_interaction.prefactor), addCommonPrefactor(_interaction.addCommonPrefactor), ignoreTensors(_interaction.ignoreTensors), isValid(_interaction.isValid),
 																trjHasTime(_interaction.trjHasTime), trjHasField(_interaction.trjHasField), trjHasTensor(_interaction.trjHasTensor), trjHasPrefactor(_interaction.trjHasPrefactor),
@@ -394,7 +486,7 @@ namespace SpinAPI
 																tdTimestep(_interaction.tdTimestep), tdInitialTensor(_interaction.tdInitialTensor),
 																tdMinFreq(_interaction.tdMinFreq), tdMaxFreq(_interaction.tdMaxFreq), tdFreqs(_interaction.tdFreqs), tdAmps(_interaction.tdAmps), tdPhases(_interaction.tdPhases),
 																tdComponents(_interaction.tdComponents), tdRandOrients(_interaction.tdRandOrients), tdThetas(_interaction.tdThetas), tdPhis(_interaction.tdPhis), tdCorrTime(_interaction.tdCorrTime),
-																tdPrintTensor(_interaction.tdPrintTensor), tdPrintField(_interaction.tdPrintField), tdSeed(_interaction.tdSeed), tdAutoseed(_interaction.tdAutoseed), tdGenerator(_interaction.tdGenerator)
+																tdPrintTensor(_interaction.tdPrintTensor), tdPrintField(_interaction.tdPrintField), tdSeed(_interaction.tdSeed), tdAutoseed(_interaction.tdAutoseed), tdGenerator(_interaction.tdGenerator), BondLengths(_interaction.BondLengths), dist(_interaction.dist)
 
 	{
 	}
@@ -412,8 +504,10 @@ namespace SpinAPI
 		this->field = _interaction.field;
 		this->dvalue = _interaction.dvalue;
 		this->evalue = _interaction.evalue;
-		this->hfiamplitude = _interaction.hfiamplitude;
+		this->hffield = _interaction.hffield;
 		this->orientations = _interaction.orientations;
+		this->BondLengths = _interaction.BondLengths;
+		this->dist = _interaction.dist;
 		this->type = _interaction.type;
 		this->fieldType = _interaction.fieldType;
 		this->prefactor = _interaction.prefactor;
@@ -506,9 +600,9 @@ namespace SpinAPI
 	}
 
 	// Returns the HFI amplitude for SCI
-	const double Interaction::Hfiamplitude() const
+	const std::vector<SCHyperfineField> Interaction::Hfiamplitude() const
 	{
-		return this->hfiamplitude;
+		return this->hffield;
 	}
 
 	// Returns the orientations for SCOI
@@ -1328,5 +1422,18 @@ namespace SpinAPI
 	{
 		return std::isfinite(_d);
 	}
-	// -----------------------------------------------------
+    
+	void FreelyJointedPolymerBL(std::vector<double>& BondLengths, std::vector<SCHyperfineField>& Fields)
+    {
+		for(auto f = Fields.begin(); f != Fields.end(); f++)
+		{
+			auto [a,n,sn] = (*f);
+			for(int i = 0; i < n; i++)
+			{
+				double bondlength = a * std::sqrt(sn * (sn+1));
+				BondLengths.push_back(bondlength);
+			}
+		}
+    }
+    // -----------------------------------------------------
 }

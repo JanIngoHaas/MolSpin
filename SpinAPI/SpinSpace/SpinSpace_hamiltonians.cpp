@@ -232,8 +232,8 @@ namespace SpinAPI
 			auto spins1 = _interaction->Group1();
 
 			//  Grab amplitude and orientation parameters
-			const double   B0   = _interaction->Hfiamplitude();     // Tesla
-			const int   n    = _interaction->Orientations(); // averaging grid
+			const SCHyperfineField field = _interaction->Hfiamplitude()[0]; 
+			const auto[B0,n,sqn] = field;
 
 			// Build Sx, Sy, Sz for *each* electron in Group1
 			arma::cx_mat Sx, Sy, Sz;
@@ -526,10 +526,9 @@ namespace SpinAPI
 			auto spinlist = _interaction->Group1();
 
 			//  Grab amplitude and orientation parameters
-			const double   B0   = _interaction->Hfiamplitude();     // Tesla
-			const int   n    = _interaction->Orientations(); // averaging grid
-			const double sqn = _interaction->SpinQuantumNumber(); //spin quantum number (e.g 1/2) 
-
+			int n = _interaction->Orientations();
+			std::vector<double> B = _interaction->VL();
+			double B0 = std::reduce(B.begin(),B.end());
 
 			// Build Sx, Sy, Sz for *each* electron in Group1
 			arma::sp_cx_mat Sx;
