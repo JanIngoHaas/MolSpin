@@ -1435,5 +1435,9 @@ namespace SpinAPI
 			}
 		}
     }
+    void FreelyJointedPolymerD(std::vector<weightings>&W, std::vector<double>& BL, double TotalLength)
+    {
+
+    }
     // -----------------------------------------------------
 }

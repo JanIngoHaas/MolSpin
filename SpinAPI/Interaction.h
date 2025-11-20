@@ -86,6 +86,7 @@ namespace SpinAPI
 		std::vector<SCHyperfineField> hffield;
 		unsigned int orientations;
 		std::vector<double> BondLengths;
+		double TotalLength;
 		SCDistribution dist;
 
 		// Special data members for random number generation
@@ -192,7 +193,7 @@ namespace SpinAPI
 
 	//semi classical distributions
     void FreelyJointedPolymerBL(std::vector<double>&, std::vector<SCHyperfineField>& ); //length of the nuclear spin vector
-    void FreelyJointedPolymerD(); //Distribution of the nuclear spin vector
+    void FreelyJointedPolymerD(std::vector<weightings>&, std::vector<double>&, double); //Distribution of the nuclear spin vector
 }
 
 #endif
