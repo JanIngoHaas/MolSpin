@@ -91,6 +91,7 @@ namespace SpinAPI
 		unsigned int orientations;
 		std::vector<double> OriWeights;
 		std::vector<double> BondLengths;
+		std::vector<double> Spacing;
 		double tau;
 		SCDistribution dist;
 
@@ -151,6 +152,7 @@ namespace SpinAPI
 		const std::vector<SCHyperfineField> Hfiamplitude() const;
 		const int Orientations() const;
 		std::vector<double>& GetOriWeights() { return this->OriWeights; };
+		std::vector<double>& GetSpacing() { return this->Spacing; };
 		const std::vector<double> VL() const { return this->BondLengths; }
 		bool HasFieldTimeDependence() const;
 		bool HasTensorTimeDependence() const;

@@ -99,9 +99,25 @@ SpinSystem system1
 	{
 		type = semiclassicalfield;
 		group1 = RPElectron1;
-		HyperfineField = "(2,2,0.5),(3,5,1),(2,10),(3,10,1,5)";
-		orientations = 1000;
+		HyperfineField = "(0.22,2,0.5),(0.3,5,1)";
+		orientations = 100;
 	}
+
+	Interaction test2
+	{
+		type = semiclassicalfield;
+		group1 = RPElectron2;
+		HyperfineField = "(0.5,2,0.5),(0.15,5,1)";
+		orientations = 100;
+	}
+
+	//interaction test3
+	//{
+	//	type = semiclassicalfield;
+	//	group1 = RPElectron1;
+	//	HyperfineField = "(0.5,2,1)";
+	//	orientations = 10;
+	//}
 
 	// -------------------------
 	// Spin States
@@ -136,33 +152,40 @@ SpinSystem system1
         // ---------------------------------------------------------
         // Transitions
         // ---------------------------------------------------------
-        Transition Product1
-        {
-                type = sink;
-                source = Singlet;
-                rate = 1e-05;
-        }
+    	//Transition Product1
+        //{
+        //        type = sink;
+        //        source = Singlet;
+        //        rate = 1e-05;
+        //}
+//
+        //Transition Product2
+        //{
+        //        type = sink;
+        //        source = T0;
+        //        rate = 1e-05;
+        //}
+//
+        //Transition Product3
+        //{
+        //        type = sink;
+        //        source = Tp;
+        //        rate = 1e-05;
+        //}
+//
+        //Transition Product4
+        //{
+        //        type = sink;
+        //        source = Tm;
+        //        rate = 1e-05;
+        //}
 
-       Transition Product2
-        {
-                type = sink;
-                source = T0;
-                rate = 1e-05;
-        }
-
-       Transition Product3
-        {
-                type = sink;
-                source = Tp;
-                rate = 1e-05;
-        }
-
-       Transition Product4
-        {
-                type = sink;
-                source = Tm;
-                rate = 1e-05;
-        }
+		Transition Decay
+		{
+			type = sink;
+			source = Identity;
+			rate = 1;
+		}
 
         // -------------------------
 	// Spin system properties

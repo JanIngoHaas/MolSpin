@@ -561,19 +561,61 @@ namespace SpinAPI
 				
 				RunSection::MCSpherePoint* points = RunSection::CalculateMCSpherePoints(n,BMax);
 				int currentcol = 0;
-				std::vector<double> weights;
+				typedef std::pair<std::pair<std::array<double,3>,double>,double> WeightsType;
+				std::vector<WeightsType> weights;
 
 				for (int k = 0; k < n; k++)
 				{
-					arma::sp_cx_mat SampleTmp = arma::zeros<arma::sp_cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
 					std::array<double,3> NuclearSpinVector;
 					RunSection::RetrieveMCPoint(NuclearSpinVector,points,k);
 					double x = NuclearSpinVector[0];
 					double y = NuclearSpinVector[1];
 					double z = NuclearSpinVector[2];
 					double r = std::sqrt(x*x + y*y + z*z);
+					if (z <= 0)
+					{
+						r = -r;
+					}
 					double sampleweight = _interaction->f({x,y,z});
-					weights.push_back(sampleweight);
+					weights.push_back({{{x,y,z},r},sampleweight});
+				}
+				
+				auto weights_sort = [](const WeightsType &a, const WeightsType &b) {
+					return a.second < b.second;
+				};
+
+				std::sort(weights.begin(),weights.end(),weights_sort);
+				
+				//seperate the weights into left and right halves
+				std::vector<WeightsType> weightsL;
+				std::vector<WeightsType> weightsR;
+				bool left = true;
+				for (auto &weight : weights)
+				{
+					left = weight.first.first[2] <= 0 ? true : false;	
+					if (left)
+					{
+						weightsL.push_back(weight);
+					}
+					else
+					{
+						weightsR.push_back(weight);
+					}
+					left = !left;
+				}
+				
+				auto weightsR_sort = [](const WeightsType &a, const WeightsType &b) {
+					return a.second > b.second;
+				};
+				std::sort(weightsR.begin(),weightsR.end(),weightsR_sort);
+				weights.clear();
+				weights.insert(weights.end(),weightsL.begin(),weightsL.end());
+				weights.insert(weights.end(),weightsR.begin(),weightsR.end());
+
+				for (int k = 0; k < n; k++)
+				{
+					arma::sp_cx_mat SampleTmp = arma::zeros<arma::sp_cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
+					auto[x,y,z] = weights[k].first.first;
 					SampleTmp = Sx * x + Sy * y + Sz * z;
 					tmp.submat(0,currentcol,this->HilbertSpaceDimensions()-1,currentcol+this->HilbertSpaceDimensions()-1) = SampleTmp;
 					currentcol += this->HilbertSpaceDimensions();
@@ -581,12 +623,26 @@ namespace SpinAPI
 
 				free(points);
 				double area = 0;
-				for (int i = 0; i < weights.size()-1; i++)
+				std::vector<double> spacing;
+				std::vector<double> spacingcheck;
+				for(int k = 0; k < weights.size(); k++)
 				{
-					double t = weights[i]+ weights[i+1];
-					area = (0.5*t) * 2*BMax/n + area;
+					if(k < weights.size()-1)
+						spacingcheck.push_back(std::abs(weights[k+1].first.second - weights[k].first.second));
+					spacing.push_back(weights[k].first.second);
 				}
-				_interaction->GetOriWeights() = weights;
+				for (int k = 0; k < weights.size()-1; k++)
+				{
+					double t = weights[k].second+ weights[k+1].second;
+					area += (0.5*t) * spacingcheck[k];
+				}
+				std::vector<double> weights_final;
+				for (auto &weight : weights)
+				{
+					weights_final.push_back(weight.second);
+				}
+				_interaction->GetOriWeights() = weights_final;
+				_interaction->GetSpacing() = spacing;
 			}
 		}
 		else
