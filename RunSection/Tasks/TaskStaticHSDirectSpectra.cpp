@@ -769,7 +769,15 @@ namespace RunSection
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; idx++)
 						{
-							arma::cx_mat OB = use_sparse_ops ? (OperatorsSparse[idx] * B) : (OperatorsDense[idx] * B);
+							arma::cx_mat OB;
+							if (use_sparse_ops)
+							{
+								OB = OperatorsSparse[idx] * B;
+							}
+							else
+							{
+								OB = OperatorsDense[idx] * B;
+							}
 							double abs_trace = std::real(arma::accu(Bconj % OB));
 							double expected_value = abs_trace / Z;
 							ExptValuesOrientation(k, idx) = expected_value;
@@ -861,7 +869,15 @@ namespace RunSection
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; ++idx)
 						{
-							arma::cx_mat OB = use_sparse_ops ? (OperatorsSparse[idx] * B) : (OperatorsDense[idx] * B);
+							arma::cx_mat OB;
+							if (use_sparse_ops)
+							{
+								OB = OperatorsSparse[idx] * B;
+							}
+							else
+							{
+								OB = OperatorsDense[idx] * B;
+							}
 							double abs_trace = std::real(arma::accu(Bconj % OB));
 							double expected_value = abs_trace / Z;
 							ExptValuesOrientation(k, idx) = expected_value;
