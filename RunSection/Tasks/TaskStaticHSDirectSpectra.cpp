@@ -19,9 +19,25 @@
 #include "Pulse.h"
 #include <cmath>
 #include <iomanip> // std::setprecision
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace RunSection
 {
+	namespace
+	{
+		double TraceSparseDense(const arma::sp_cx_mat &A, const arma::cx_mat &B)
+		{
+			arma::cx_double sum = arma::cx_double(0.0, 0.0);
+			for (auto it = A.begin(); it != A.end(); ++it)
+			{
+				sum += (*it) * B(it.col(), it.row());
+			}
+			return std::real(sum);
+		}
+	}
+
 	// -----------------------------------------------------
 	// TaskStaticHSDirectSpectra Constructors and Destructor
 	// -----------------------------------------------------
@@ -206,6 +222,8 @@ namespace RunSection
 
 			int projection_counter = 0;
 			std::map<int, arma::sp_cx_mat> Operators;
+			std::vector<arma::sp_cx_mat> OperatorsSparse;
+			std::vector<arma::cx_mat> OperatorsDense;
 			arma::vec rates(1, 1);
 
 			// Getting the projection operators
@@ -286,6 +304,29 @@ namespace RunSection
 						}	
 					}
 				}
+			}
+
+			OperatorsSparse.resize(projection_counter);
+			double total_nnz = 0.0;
+			double total_size = 0.0;
+			for (const auto &entry : Operators)
+			{
+				OperatorsSparse[entry.first] = entry.second;
+				total_nnz += static_cast<double>(entry.second.n_nonzero);
+				total_size += static_cast<double>(entry.second.n_rows) * entry.second.n_cols;
+			}
+			bool use_sparse_ops = (total_size > 0.0) && ((total_nnz / total_size) < 0.1);
+			if (!use_sparse_ops)
+			{
+				OperatorsDense.resize(projection_counter);
+				for (const auto &entry : Operators)
+				{
+					OperatorsDense[entry.first] = arma::cx_mat(entry.second);
+				}
+			}
+			else if (projection_counter > 0)
+			{
+				this->Log() << "Using sparse operators for expectation values." << std::endl;
 			}
 
 			// Get the Hamiltonian
@@ -493,9 +534,61 @@ namespace RunSection
 				rho_integrated.zeros(dim, dim);
 			}
 
-			size_t grid_index = 0;
-			for (const auto &grid_point : grid)
+			size_t grid_size = grid.size();
+			int nthreads = 1;
+#ifdef _OPENMP
+			nthreads = omp_get_max_threads();
+#endif
+
+			std::vector<arma::mat> ExptValuesPartial;
+			if (method_timeevo)
 			{
+				ExptValuesPartial.resize(nthreads);
+				for (auto &m : ExptValuesPartial)
+				{
+					m.zeros(num_steps, projection_counter);
+				}
+			}
+
+			std::vector<arma::cx_mat> rho_integrated_partial;
+			if (method_timeinf)
+			{
+				int dim = InitialStateVector.n_rows * Z;
+				rho_integrated_partial.resize(nthreads);
+				for (auto &m : rho_integrated_partial)
+				{
+					m.zeros(dim, dim);
+				}
+			}
+
+			arma::cx_mat Iden_dense;
+			if (method_timeinf)
+			{
+				int dim = InitialStateVector.n_rows * Z;
+				Iden_dense = arma::eye<arma::cx_mat>(dim, dim);
+			}
+
+			SpinAPI::SpinSpace base_space(space);
+			base_space.SetReactionOperatorType(this->reactionOperators);
+			base_space.UseSuperoperatorSpace(false);
+
+			std::vector<SpinAPI::SpinSpace> spaces;
+			spaces.resize(nthreads);
+			for (int t = 0; t < nthreads; ++t)
+			{
+				spaces[t] = base_space;
+			}
+
+#pragma omp parallel for schedule(static) if (grid_size > 1)
+			for (size_t grid_num = 0; grid_num < grid_size; ++grid_num)
+			{
+				int tid = 0;
+#ifdef _OPENMP
+				tid = omp_get_thread_num();
+#endif
+				SpinAPI::SpinSpace &space_thread = spaces[tid];
+
+				const auto &grid_point = grid[grid_num];
 				double theta, phi, weight;
 				std::tie(theta, phi, weight) = grid_point;
 
@@ -510,7 +603,7 @@ namespace RunSection
 				if (hasH0list)
 				{
 					arma::sp_cx_mat H0;
-					if (!space.BaseHamiltonianRotated(HamiltonianH0list, Rot_mat, H0))
+					if (!space_thread.BaseHamiltonianRotated(HamiltonianH0list, Rot_mat, H0))
 					{
 						this->Log() << "Failed to obtain rotated Hamiltonian for SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
 						continue;
@@ -520,7 +613,7 @@ namespace RunSection
 					if (hasH1list)
 					{
 						arma::sp_cx_mat H1;
-						if (!space.ThermalHamiltonian(HamiltonianH1list, H1))
+						if (!space_thread.ThermalHamiltonian(HamiltonianH1list, H1))
 						{
 							this->Log() << "Failed to obtain Hamiltonian H1 in Hilbert Space." << std::endl;
 							continue;
@@ -531,7 +624,7 @@ namespace RunSection
 				}
 				else
 				{
-					if (!space.Hamiltonian(H))
+					if (!space_thread.Hamiltonian(H))
 					{
 						this->Log() << "Failed to obtain the Hamiltonian in Hilbert Space." << std::endl;
 						std::cout << "# ERROR: Failed to obtain the Hamiltonian!" << std::endl;
@@ -550,7 +643,7 @@ namespace RunSection
 					for (const auto &seq : Pulsesequence)
 					{
 						// Write which pulse in pulsesequence is calculating now
-						if (grid_index == 0)
+						if (grid_num == 0)
 						{
 							this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
 						}
@@ -569,24 +662,21 @@ namespace RunSection
 								{
 									// Create a Pulse operator in HS; only one side of exponentials as we only propagate wavevectors
 									arma::sp_cx_mat pulse_operator;
-									if (!space.PulseOperatorOnStatevector((*pulse), pulse_operator))
+									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
 										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
 										continue;
 									}
 
 									// Take a step, "first" is propagator and "second" is current state
-									for (int col = 0; col < int(B.n_cols); col++)
-									{
-										B.col(col) = pulse_operator * B.col(col);
-									}
+									B = pulse_operator * B;
 								}
 								else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulseStaticField)
 								{
 
 									// Create a Pulse operator in HS; only one side of exponentials as we only propagate wavevectors
 									arma::sp_cx_mat pulse_operator;
-									if (!space.PulseOperatorOnStatevector((*pulse), pulse_operator))
+									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
 										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
 										continue;
@@ -603,10 +693,7 @@ namespace RunSection
 									for (unsigned int n = 1; n <= steps; n++)
 									{
 										// Take a step, "first" is propagator and "second" is current state
-										for (int col = 0; col < int(B.n_cols); col++)
-										{
-											B.col(col) = G.first * G.second.col(col);
-										}
+										B = G.first * G.second;
 
 										// Get the new current state vector matrix
 										G.second = B;
@@ -616,7 +703,7 @@ namespace RunSection
 								{
 									// Create a Pulse operator in SS
 									arma::sp_cx_mat pulse_operator;
-									if (!space.PulseOperatorOnStatevector((*pulse), pulse_operator))
+									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
 										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
 										continue;
@@ -633,10 +720,7 @@ namespace RunSection
 									for (unsigned int n = 1; n <= steps; n++)
 									{
 										// Take a step, "first" is propagator and "second" is current state
-										for (int col = 0; col < int(B.n_cols); col++)
-										{
-											B.col(col) = G.first * G.second.col(col);
-										}
+										B = G.first * G.second;
 
 										// Get the new current state density vector
 										G.second = B;
@@ -659,10 +743,7 @@ namespace RunSection
 								for (unsigned int n = 1; n <= steps; n++)
 								{
 									// Take a step, "first" is propagator and "second" is current state
-									for (int col = 0; col < int(B.n_cols); col++)
-									{
-										B.col(col) = G.first * G.second.col(col);
-									}
+									B = G.first * G.second;
 
 									// Get the new current state density vector
 									G.second = B;
@@ -684,16 +765,18 @@ namespace RunSection
 
 					for (int k = 0; k < num_steps; k++)
 					{
+						arma::cx_mat Bconj = arma::conj(B);
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; idx++)
 						{
-							double abs_trace = std::real(arma::trace(B.t() * Operators[idx] * B));
+							arma::cx_mat OB = use_sparse_ops ? (OperatorsSparse[idx] * B) : (OperatorsDense[idx] * B);
+							double abs_trace = std::real(arma::accu(Bconj % OB));
 							double expected_value = abs_trace / Z;
 							ExptValuesOrientation(k, idx) = expected_value;
 						}
 
 						// Update B using the Higham propagator
-						B = space.HighamProp(H_prop, B, -arma::cx_double(0.0, 1.0) * dt, precision, M);
+						B = space_thread.HighamProp(H_prop, B, -arma::cx_double(0.0, 1.0) * dt, precision, M);
 					}
 				}
 				else if (method_timeevo && propmethod == "krylov")
@@ -718,7 +801,7 @@ namespace RunSection
 						KryBasis.col(0) = prop_state / norm(prop_state);
 
 						double h_mplusone_m;
-						space.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
+						space_thread.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
 
 						arma::cx_colvec e1;
 						e1.zeros(krylovsize);
@@ -747,7 +830,7 @@ namespace RunSection
 
 							KryBasis.col(0) = prop_state / norm(prop_state);
 
-							space.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
+							space_thread.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
 							cx = arma::expmat(Hessen * dt) * e1;
 
 							// Update the state using Krylov Subspace propagator
@@ -760,7 +843,10 @@ namespace RunSection
 				}
 				else if (method_timeevo)
 				{
-					this->Log() << "Using robust matrix exponential propagator for time-independent Hamiltonian." << std::endl;
+					if (grid_num == 0)
+					{
+						this->Log() << "Using robust matrix exponential propagator for time-independent Hamiltonian." << std::endl;
+					}
 
 					// Include the recombination operator K
 					arma::sp_cx_mat H_total = arma::cx_double(0.0, -1.0) * H - K;
@@ -771,36 +857,33 @@ namespace RunSection
 					// Propagate B
 					for (int k = 0; k < num_steps; ++k)
 					{
+						arma::cx_mat Bconj = arma::conj(B);
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; ++idx)
 						{
-							double abs_trace = std::real(arma::trace(B.t() * arma::cx_mat(Operators[idx]) * B));
+							arma::cx_mat OB = use_sparse_ops ? (OperatorsSparse[idx] * B) : (OperatorsDense[idx] * B);
+							double abs_trace = std::real(arma::accu(Bconj % OB));
 							double expected_value = abs_trace / Z;
 							ExptValuesOrientation(k, idx) = expected_value;
 						}
 
-						for (int col = 0; col < int(B.n_cols); col++)
-						{
-							B.col(col) = exp_H * B.col(col);
-						}
+						B = exp_H * B;
 					}
 				}
 
 				if (method_timeevo)
-					ExptValues += weight * ExptValuesOrientation;
+					ExptValuesPartial[tid] += weight * ExptValuesOrientation;
 				if (method_timeinf)
 				{
 					// Compute integrated density matrix in Hilbert space via Sylvester/Lyapunov:
 					// A_state X + X A_state^† = -rho0, with A_state = -i H - K
 					arma::cx_mat rho0mat = B * B.st();
 					arma::cx_mat A_dense = -arma::cx_double(0.0, 1.0) * arma::cx_mat(H) - arma::cx_mat(K);
-					arma::cx_mat B_state = A_dense.st(); // Hermitian adjoint
+					arma::cx_mat A_star = arma::conj(A_dense);
 
-					// Solve (I ⊗ A_state^† + A_state ⊗ I) vec(X) = -vec(rho0)
-					arma::cx_mat Iden_dense = arma::eye<arma::cx_mat>(H.n_rows, H.n_cols);
-					arma::cx_mat kron_left = arma::kron(Iden_dense, B_state.t());
-					arma::cx_mat kron_right = arma::kron(A_dense, Iden_dense);
-					arma::cx_mat L = kron_left + kron_right;
+					// Solve (A_state^* ⊗ I + I ⊗ A_state) vec(X) = -vec(rho0)
+					// This corresponds to A_state X + X A_state^† = -rho0.
+					arma::cx_mat L = arma::kron(A_star, Iden_dense) + arma::kron(Iden_dense, A_dense);
 					arma::cx_vec rhs = arma::vectorise(-rho0mat);
 					arma::cx_vec sol = arma::solve(L, rhs);
 					if (sol.is_empty())
@@ -810,9 +893,23 @@ namespace RunSection
 					}
 					arma::cx_mat X = arma::reshape(sol, rho0mat.n_rows, rho0mat.n_cols);
 
-					rho_integrated += weight * X;
+					rho_integrated_partial[tid] += weight * X;
 				}
-				grid_index++;
+			}
+
+			if (method_timeevo)
+			{
+				for (auto &m : ExptValuesPartial)
+				{
+					ExptValues += m;
+				}
+			}
+			if (method_timeinf)
+			{
+				for (auto &m : rho_integrated_partial)
+				{
+					rho_integrated += m;
+				}
 			}
 
 			// Propagate the system in time using the specified method and write results
@@ -833,7 +930,8 @@ namespace RunSection
 
 				for (int idx = 0; idx < projection_counter; idx++)
 				{
-					double val = std::real(arma::trace(arma::cx_mat(Operators[idx]) * rho_integrated)) / Z;
+					double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], rho_integrated) / Z)
+												: (std::real(arma::trace(OperatorsDense[idx] * rho_integrated)) / Z);
 					this->Data() << std::setprecision(12) << val << " ";
 				}
 				this->Data() << std::endl;
