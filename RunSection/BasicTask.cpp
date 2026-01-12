@@ -509,16 +509,7 @@ namespace RunSection
 			totalIntegral += t.value;
 			totalVec += t.VectorValue;
 			index += 1;
-
-			//if(totalIntegral < tot)
-			//{
-			//	std::cin.get();
-			//}
-			tot = totalIntegral;
 		}
-			//std::cout << totalIntegral << std::endl;
-			//std::cout << totalVec << std::endl;
-
 		return {totalVec,totalIntegral};
 
     }

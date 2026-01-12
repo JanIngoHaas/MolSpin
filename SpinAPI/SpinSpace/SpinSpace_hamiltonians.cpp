@@ -233,8 +233,9 @@ namespace SpinAPI
 
 			//  Grab amplitude and orientation parameters
 			const SCHyperfineField field = _interaction->Hfiamplitude()[0]; 
-			const auto[B,n,sqn] = field;
+			const auto[B,nu,sqn] = field;
 			const auto B0 = B[0][0]; 
+			const int n = _interaction->Orientations();		// averaging grid
 
 			// Build Sx, Sy, Sz for *each* electron in Group1
 			arma::cx_mat Sx, Sy, Sz;
@@ -630,7 +631,7 @@ namespace SpinAPI
 					spacing.push_back(weights[k].first.second);
 				}
 				//get the normalization factor
-				for (int k = 0; k < weights.size()-1; k++)
+				for (unsigned int k = 0; k < weights.size()-1; k++)
 				{
 					double t = weights[k].second+ weights[k+1].second;
 					area += (0.5*t) * spacingcheck[k];
@@ -640,8 +641,9 @@ namespace SpinAPI
 				for (auto &weight : weights)
 				{
 					weights_final.push_back(weight.second/area);
-					tmp += weight * (Bx * Sx + Bz * Sz);  // Sy-component = 0 by symmetry
 				}
+				_interaction->GetOriWeights() = weights_final;
+				_interaction->GetSpacing() = spacing;
 			}
 		}
 		else
@@ -666,19 +668,27 @@ namespace SpinAPI
 		{
 			arma::sp_cx_mat lhs;
 			arma::sp_cx_mat rhs;
-			auto result = this->SuperoperatorFromLeftOperator(tmp, lhs);
-			result &= this->SuperoperatorFromRightOperator(tmp, rhs);
-			if (result)
-				_out = lhs - rhs;
-			else
-				return false;
+			int submats = tmp.n_cols / this->HilbertSpaceDimensions();
+			int superoperatorspace = this->HilbertSpaceDimensions() * this->HilbertSpaceDimensions();
+			_out = arma::zeros<arma::sp_cx_mat>(superoperatorspace, submats * superoperatorspace);
+			for (int i = 0; i < submats; i++)
+			{  
+				auto tmpmat = tmp.submat(0,i*this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions()-1, (i+1)*this->HilbertSpaceDimensions()-1);
+				auto result = this->SuperoperatorFromLeftOperator(tmpmat, lhs);
+				result &= this->SuperoperatorFromRightOperator(tmpmat, rhs);
+				if (result)
+				{
+					_out.submat(0,i*superoperatorspace, superoperatorspace-1 ,(i+1)*superoperatorspace - 1) = lhs - rhs;
+				}
+				else
+					return false;
+			}
 		}
 		else
 		{
 			// We already have the result in the dense matrix to the Hamiltonian at the given time or trajectorye Hilbert space
 			_out = tmp;
 		}
-
 		return true;
 	}
 
@@ -908,7 +918,10 @@ namespace SpinAPI
 			auto spinlist = _interaction->Group1();
 
 			//  Grab amplitude and orientation parameters
-			const double B0 = _interaction->Hfiamplitude(); // Tesla
+			const SCHyperfineField field = _interaction->Hfiamplitude()[0]; 
+			const auto[B,nu,sqn] = field;
+			const auto B0 = B[0][0];
+
 			const int n = _interaction->Orientations();		// averaging grid
 
 			// Build Sx, Sy, Sz for *each* electron in Group1
@@ -944,8 +957,6 @@ namespace SpinAPI
 
 					tmp += weight * (Bx * Sx + Bz * Sz); // Sy-component = 0 by symmetry
 				}
-				_interaction->GetOriWeights() = weights_final;
-				_interaction->GetSpacing() = spacing;
 			}
 		}
 		else
@@ -970,27 +981,19 @@ namespace SpinAPI
 		{
 			arma::sp_cx_mat lhs;
 			arma::sp_cx_mat rhs;
-			int submats = tmp.n_cols / this->HilbertSpaceDimensions();
-			int superoperatorspace = this->HilbertSpaceDimensions() * this->HilbertSpaceDimensions();
-			_out = arma::zeros<arma::sp_cx_mat>(superoperatorspace, submats * superoperatorspace);
-			for (int i = 0; i < submats; i++)
-			{  
-				auto tmpmat = tmp.submat(0,i*this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions()-1, (i+1)*this->HilbertSpaceDimensions()-1);
-				auto result = this->SuperoperatorFromLeftOperator(tmpmat, lhs);
-				result &= this->SuperoperatorFromRightOperator(tmpmat, rhs);
-				if (result)
-				{
-					_out.submat(0,i*superoperatorspace, superoperatorspace-1 ,(i+1)*superoperatorspace - 1) = lhs - rhs;
-				}
-				else
-					return false;
-			}
+			auto result = this->SuperoperatorFromLeftOperator(tmp, lhs);
+			result &= this->SuperoperatorFromRightOperator(tmp, rhs);
+			if (result)
+				_out = lhs - rhs;
+			else
+				return false;
 		}
 		else
 		{
 			// We already have the result in the dense matrix to the Hamiltonian at the given time or trajectorye Hilbert space
 			_out = tmp;
 		}
+
 		return true;
 	}
 
