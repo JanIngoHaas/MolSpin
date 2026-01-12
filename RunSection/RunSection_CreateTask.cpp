@@ -37,6 +37,7 @@
 #include "TaskMultiStaticSSNakajimaZwanzigTimeEvo.h"
 
 #include "TaskStaticSSSpectra.h"
+#include "TaskStaticSSPowderSpectra.h"
 #include "TaskStaticSSSpectraNakajimaZwanzig.h"
 #include "TaskStaticSSCIDNP.h"
 
@@ -170,6 +171,13 @@ namespace RunSection
 		{
 			task = std::make_shared<TaskStaticSSSpectra>(_obj, *this);
 		}
+
+		// NEW (Added by Irina Anisimova and Luca Gehards):Spectroscopy module
+		else if (_tasktype.compare("staticss-powderspectra") == 0 || _tasktype.compare("StaticSS-Powderspectra") == 0)
+		{
+			task = std::make_shared<TaskStaticSSPowderSpectra>(_obj, *this);
+		}
+
 
 		// NEW (Added by Luca Gerhards):Spectroscopy module with spin relaxation through Nakahima-Zwanzig equation
 		else if (_tasktype.compare("staticss-spectra-nakajimazwanzig") == 0 || _tasktype.compare("StaticSS-Spectra-Nakajimazwanzig") == 0)

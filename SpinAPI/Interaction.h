@@ -103,6 +103,9 @@ namespace SpinAPI
 		bool tdAutoseed;
 		std::mt19937 tdGenerator;
 
+		// Special data members for tensor with specified rotation frame
+		std::vector<double> framelist;
+
 		// Private methods to create ActionTargets
 		std::vector<RunSection::NamedActionVector> CreateActionVectors(const std::string &);
 		std::vector<RunSection::NamedActionScalar> CreateActionScalars(const std::string &);
@@ -160,6 +163,7 @@ namespace SpinAPI
 		bool HasFieldTimeDependence() const;
 		bool HasTensorTimeDependence() const;
 		bool HasTimeDependence() const;
+		const arma::vec Framelist() const;
 
 		// Get time-dependency parameters
 		double GetTDFrequency() const { return this->tdFrequency; };
