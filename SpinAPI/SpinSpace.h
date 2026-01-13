@@ -30,6 +30,38 @@
 
 namespace SpinAPI
 {
+	struct HilbertRelaxationTerm
+	{
+		arma::sp_cx_mat L;
+		arma::sp_cx_mat R;
+		arma::sp_cx_mat M;
+		double rate = 0.0;
+	};
+
+	struct HilbertRelaxationDephasingTerm
+	{
+		arma::sp_cx_mat Psinglet;
+		arma::sp_cx_mat Ptriplet;
+		double rate = 0.0;
+	};
+
+	struct HilbertRelaxationRandomFieldTerm
+	{
+		arma::sp_cx_mat Sx;
+		arma::sp_cx_mat Sy;
+		arma::sp_cx_mat Sz;
+		double rate1 = 0.0;
+		double rate2 = 0.0;
+		double rate3 = 0.0;
+	};
+
+	struct HilbertRelaxationCache
+	{
+		std::vector<HilbertRelaxationTerm> lindblad_terms;
+		std::vector<HilbertRelaxationDephasingTerm> dephasing_terms;
+		std::vector<HilbertRelaxationRandomFieldTerm> random_field_terms;
+	};
+
 	class SpinSpace
 	{
 	private:
@@ -251,9 +283,12 @@ namespace SpinAPI
 		// ------------------------------------------------
 		// Relaxation operators (SpinSpace_relaxation.cpp)
 		// ------------------------------------------------
-		// NOTE: These operators can only be created in superoperator space!
+		// NOTE: Dense/sparse operators require superspace; use HilbertRelaxationCache for Hilbert-space propagation.
 		bool RelaxationOperator(const operator_ptr &, arma::cx_mat &) const;
 		bool RelaxationOperator(const operator_ptr &, arma::sp_cx_mat &) const;
+		bool RelaxationOperator(const operator_ptr &, HilbertRelaxationCache &) const;
+		bool ApplyRelaxationHilbert(const HilbertRelaxationCache &, const arma::cx_mat &, arma::cx_mat &) const;
+		bool RelaxationSuperoperatorHilbert(const HilbertRelaxationCache &, arma::cx_mat &) const;
 
 		// Same relaxation operators, but when unitary transformation of projection operators is required
 		bool RelaxationOperatorFrameChange(const operator_ptr &_operator, arma::cx_mat _rotationmatrix, arma::cx_mat &_out) const;

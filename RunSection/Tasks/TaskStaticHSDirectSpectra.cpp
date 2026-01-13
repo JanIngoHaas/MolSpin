@@ -343,6 +343,21 @@ namespace RunSection
 
 			arma::cx_mat Binitial = B;
 
+			SpinAPI::HilbertRelaxationCache relaxation_cache;
+			bool use_density_matrix = false;
+			for (auto j = (*i)->operators_cbegin(); j != (*i)->operators_cend(); j++)
+			{
+				if (space.RelaxationOperator((*j), relaxation_cache))
+				{
+					use_density_matrix = true;
+					this->Log() << "Added relaxation operator \"" << (*j)->Name() << "\" to Hilbert-space propagation.\n";
+				}
+			}
+			if (use_density_matrix)
+			{
+				this->Log() << "Relaxation operators detected. Using density-matrix propagation in Hilbert space." << std::endl;
+			}
+
 			// Setting or calculating total time.
 			double totaltime = this->totaltime;
 			double inputTotaltime = 0.0;
@@ -695,6 +710,12 @@ namespace RunSection
 				Iden_dense = arma::eye<arma::cx_mat>(dim, dim);
 			}
 
+			arma::cx_mat relaxation_super;
+			if (method_timeinf && use_density_matrix)
+			{
+				space.RelaxationSuperoperatorHilbert(relaxation_cache, relaxation_super);
+			}
+
 			SpinAPI::SpinSpace base_space(space);
 			base_space.SetReactionOperatorType(this->reactionOperators);
 			base_space.UseSuperoperatorSpace(false);
@@ -757,6 +778,205 @@ namespace RunSection
 						std::cout << "# ERROR: Failed to obtain the Hamiltonian!" << std::endl;
 						continue;
 					}
+				}
+
+				if (use_density_matrix)
+				{
+					arma::cx_mat rho = Binitial * Binitial.st();
+
+					auto record_expectation_rho = [&](arma::mat &target, size_t row_index, const arma::cx_mat &state) {
+						for (int idx = 0; idx < projection_counter; ++idx)
+						{
+							double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], state) / Z)
+														: (std::real(arma::trace(OperatorsDense[idx] * state)) / Z);
+							target(row_index, idx) = val;
+						}
+					};
+
+					auto drho = [&](const arma::cx_mat &state, const arma::sp_cx_mat &H_total) {
+						arma::cx_mat out = -arma::cx_double(0.0, 1.0) * (H_total * state - state * H_total);
+						out -= (K * state + state * K);
+						arma::cx_mat relax;
+						space_thread.ApplyRelaxationHilbert(relaxation_cache, state, relax);
+						out += relax;
+						return out;
+					};
+
+					auto rk4_step = [&](arma::cx_mat &state, const arma::sp_cx_mat &H_total, double step_dt) {
+						arma::cx_mat k1 = drho(state, H_total);
+						arma::cx_mat k2 = drho(state + (0.5 * step_dt) * k1, H_total);
+						arma::cx_mat k3 = drho(state + (0.5 * step_dt) * k2, H_total);
+						arma::cx_mat k4 = drho(state + step_dt * k3, H_total);
+						state += (step_dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+					};
+
+					size_t pulse_step_index = 0;
+					arma::mat ExptValuesPulseOrientation;
+					if (has_pulse_output)
+					{
+						ExptValuesPulseOrientation.zeros(pulse_times.size(), projection_counter);
+						if (pulse_has_initial_step)
+						{
+							record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+							pulse_step_index = 1;
+						}
+					}
+
+					if (hasPulseSequence)
+					{
+						for (const auto &seq : Pulsesequence)
+						{
+							if (grid_num == 0)
+							{
+								this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
+							}
+
+							std::string pulse_name = std::get<0>(seq);
+							double timerelaxation = std::get<1>(seq);
+
+							for (auto pulse = (*i)->pulses_cbegin(); pulse < (*i)->pulses_cend(); pulse++)
+							{
+								if ((*pulse)->Name().compare(pulse_name) == 0)
+								{
+									double pulse_dt = (*pulse)->Timestep();
+									if (!std::isfinite(pulse_dt) || pulse_dt <= 0.0)
+									{
+										this->Log() << "Invalid timestep for pulse \"" << (*pulse)->Name() << "\". Skipping pulse propagation." << std::endl;
+										continue;
+									}
+
+									if ((*pulse)->Type() == SpinAPI::PulseType::InstantPulse)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+										arma::cx_mat U = arma::cx_mat(pulse_operator);
+										rho = U * rho * U.st();
+									}
+									else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulseStaticField)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+
+										arma::sp_cx_mat H_pulse = H + pulse_operator;
+										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
+										for (unsigned int n = 1; n <= steps; ++n)
+										{
+											rk4_step(rho, H_pulse, pulse_dt);
+
+											if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+											{
+												record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+												++pulse_step_index;
+											}
+										}
+									}
+									else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulse)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+
+										double pulse_factor = std::cos((*pulse)->Frequency() * pulse_dt);
+										arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
+										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
+										for (unsigned int n = 1; n <= steps; ++n)
+										{
+											rk4_step(rho, H_pulse, pulse_dt);
+
+											if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+											{
+												record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+												++pulse_step_index;
+											}
+										}
+									}
+									else
+									{
+										this->Log() << "Not implemented yet, sorry." << std::endl;
+									}
+
+									unsigned int relax_steps = static_cast<unsigned int>(std::abs(timerelaxation / pulse_dt));
+									for (unsigned int n = 1; n <= relax_steps; ++n)
+									{
+										rk4_step(rho, H, pulse_dt);
+
+										if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+										{
+											record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+											++pulse_step_index;
+										}
+									}
+								}
+							}
+						}
+					}
+
+					if (has_pulse_output && pulse_step_index != ExptValuesPulseOrientation.n_rows)
+					{
+						if (grid_num == 0)
+						{
+							this->Log() << "Warning: Pulse output step count mismatch. Expected " << ExptValuesPulseOrientation.n_rows
+										<< ", recorded " << pulse_step_index << "." << std::endl;
+						}
+					}
+
+					arma::mat ExptValuesOrientation;
+					if (method_timeevo)
+					{
+						if (grid_num == 0 && propmethod != "normal")
+						{
+							this->Log() << "Relaxation operators active; using RK4 density-matrix propagation." << std::endl;
+						}
+
+						ExptValuesOrientation.zeros(num_steps, projection_counter);
+						for (int k = 0; k < num_steps; ++k)
+						{
+							record_expectation_rho(ExptValuesOrientation, k, rho);
+							rk4_step(rho, H, dt);
+						}
+					}
+
+					if (method_timeinf)
+					{
+						arma::cx_mat rho0mat = rho;
+						arma::cx_mat A_dense = -arma::cx_double(0.0, 1.0) * arma::cx_mat(H) - arma::cx_mat(K);
+						arma::cx_mat A_star = arma::conj(A_dense);
+
+						arma::cx_mat L = arma::kron(A_star, Iden_dense) + arma::kron(Iden_dense, A_dense);
+						if (!relaxation_super.is_empty())
+						{
+							L += relaxation_super;
+						}
+						arma::cx_vec rhs = arma::vectorise(-rho0mat);
+						arma::cx_vec sol = arma::solve(L, rhs);
+						if (sol.is_empty())
+						{
+							this->Log() << "Failed to solve timeinf Lyapunov equation in Hilbert space." << std::endl;
+							continue;
+						}
+						arma::cx_mat X = arma::reshape(sol, rho0mat.n_rows, rho0mat.n_cols);
+
+						rho_integrated_partial[tid] += weight * X;
+					}
+
+					if (has_pulse_output)
+						ExptValuesPulsePartial[tid] += weight * ExptValuesPulseOrientation;
+
+					if (method_timeevo)
+						ExptValuesPartial[tid] += weight * ExptValuesOrientation;
+
+					continue;
 				}
 
 				arma::cx_mat B = Binitial;
