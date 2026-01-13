@@ -31,6 +31,7 @@ Benji*
 msd-files/
 *.out
 python/
+*.txt
 
 #ignore vscode workspase files
 MolSpin.code-workspace
