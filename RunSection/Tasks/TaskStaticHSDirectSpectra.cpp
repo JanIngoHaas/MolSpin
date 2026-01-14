@@ -783,6 +783,32 @@ namespace RunSection
 				if (use_density_matrix)
 				{
 					arma::cx_mat rho = Binitial * Binitial.st();
+					int dim = static_cast<int>(rho.n_rows);
+
+					arma::cx_mat work_left(dim, dim, arma::fill::zeros);
+					arma::cx_mat work_right(dim, dim, arma::fill::zeros);
+					arma::cx_mat relax(dim, dim, arma::fill::zeros);
+					arma::cx_mat k1(dim, dim, arma::fill::zeros);
+					arma::cx_mat k2(dim, dim, arma::fill::zeros);
+					arma::cx_mat k3(dim, dim, arma::fill::zeros);
+					arma::cx_mat k4(dim, dim, arma::fill::zeros);
+					arma::cx_mat tmp_state(dim, dim, arma::fill::zeros);
+					arma::cx_mat rk_accum(dim, dim, arma::fill::zeros);
+
+					bool use_dense_H = false;
+					arma::cx_mat H_dense;
+					double H_density = 0.0;
+					if (H.n_rows > 0 && H.n_cols > 0)
+					{
+						H_density = static_cast<double>(H.n_nonzero) / (static_cast<double>(H.n_rows) * static_cast<double>(H.n_cols));
+					}
+					if (H_density > 0.15)
+					{
+						H_dense = arma::cx_mat(H);
+						use_dense_H = true;
+					}
+
+					const arma::cx_double imag_unit(0.0, 1.0);
 
 					auto record_expectation_rho = [&](arma::mat &target, size_t row_index, const arma::cx_mat &state) {
 						for (int idx = 0; idx < projection_counter; ++idx)
@@ -793,21 +819,41 @@ namespace RunSection
 						}
 					};
 
-					auto drho = [&](const arma::cx_mat &state, const arma::sp_cx_mat &H_total) {
-						arma::cx_mat out = -arma::cx_double(0.0, 1.0) * (H_total * state - state * H_total);
-						out -= (K * state + state * K);
-						arma::cx_mat relax;
+					auto drho = [&](const arma::cx_mat &state, const arma::sp_cx_mat &H_total, const arma::cx_mat *H_dense_ptr, arma::cx_mat &out) {
+						if (H_dense_ptr != nullptr)
+						{
+							work_left = (*H_dense_ptr) * state;
+							work_right = state * (*H_dense_ptr);
+						}
+						else
+						{
+							work_left = H_total * state;
+							work_right = state * H_total;
+						}
+						out = -imag_unit * (work_left - work_right);
+						work_left = K * state;
+						work_right = state * K;
+						out -= (work_left + work_right);
 						space_thread.ApplyRelaxationHilbert(relaxation_cache, state, relax);
 						out += relax;
-						return out;
 					};
 
-					auto rk4_step = [&](arma::cx_mat &state, const arma::sp_cx_mat &H_total, double step_dt) {
-						arma::cx_mat k1 = drho(state, H_total);
-						arma::cx_mat k2 = drho(state + (0.5 * step_dt) * k1, H_total);
-						arma::cx_mat k3 = drho(state + (0.5 * step_dt) * k2, H_total);
-						arma::cx_mat k4 = drho(state + step_dt * k3, H_total);
-						state += (step_dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+					auto rk4_step = [&](arma::cx_mat &state, const arma::sp_cx_mat &H_total, const arma::cx_mat *H_dense_ptr, double step_dt) {
+						drho(state, H_total, H_dense_ptr, k1);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k1;
+						drho(tmp_state, H_total, H_dense_ptr, k2);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k2;
+						drho(tmp_state, H_total, H_dense_ptr, k3);
+						tmp_state = state;
+						tmp_state += step_dt * k3;
+						drho(tmp_state, H_total, H_dense_ptr, k4);
+						rk_accum = k1;
+						rk_accum += 2.0 * k2;
+						rk_accum += 2.0 * k3;
+						rk_accum += k4;
+						state += (step_dt / 6.0) * rk_accum;
 					};
 
 					size_t pulse_step_index = 0;
@@ -865,16 +911,33 @@ namespace RunSection
 											continue;
 										}
 
-										arma::sp_cx_mat H_pulse = H + pulse_operator;
 										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
-										for (unsigned int n = 1; n <= steps; ++n)
+										if (use_dense_H)
 										{
-											rk4_step(rho, H_pulse, pulse_dt);
-
-											if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator);
+											for (unsigned int n = 1; n <= steps; ++n)
 											{
-												record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
-												++pulse_step_index;
+												rk4_step(rho, H, &H_pulse_dense, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else
+										{
+											arma::sp_cx_mat H_pulse = H + pulse_operator;
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H_pulse, nullptr, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
 											}
 										}
 									}
@@ -888,16 +951,33 @@ namespace RunSection
 										}
 
 										double pulse_factor = std::cos((*pulse)->Frequency() * pulse_dt);
-										arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
 										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
-										for (unsigned int n = 1; n <= steps; ++n)
+										if (use_dense_H)
 										{
-											rk4_step(rho, H_pulse, pulse_dt);
-
-											if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
+											for (unsigned int n = 1; n <= steps; ++n)
 											{
-												record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
-												++pulse_step_index;
+												rk4_step(rho, H, &H_pulse_dense, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else
+										{
+											arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H_pulse, nullptr, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
 											}
 										}
 									}
@@ -909,7 +989,7 @@ namespace RunSection
 									unsigned int relax_steps = static_cast<unsigned int>(std::abs(timerelaxation / pulse_dt));
 									for (unsigned int n = 1; n <= relax_steps; ++n)
 									{
-										rk4_step(rho, H, pulse_dt);
+										rk4_step(rho, H, use_dense_H ? &H_dense : nullptr, pulse_dt);
 
 										if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
 										{
@@ -943,7 +1023,7 @@ namespace RunSection
 						for (int k = 0; k < num_steps; ++k)
 						{
 							record_expectation_rho(ExptValuesOrientation, k, rho);
-							rk4_step(rho, H, dt);
+							rk4_step(rho, H, use_dense_H ? &H_dense : nullptr, dt);
 						}
 					}
 

@@ -35,6 +35,10 @@ namespace SpinAPI
 		arma::sp_cx_mat L;
 		arma::sp_cx_mat R;
 		arma::sp_cx_mat M;
+		arma::sp_cx_mat L_dag;
+		arma::sp_cx_mat R_t;
+		arma::sp_cx_mat M_t;
+		arma::sp_cx_mat M_dag;
 		double rate = 0.0;
 	};
 
@@ -42,6 +46,10 @@ namespace SpinAPI
 	{
 		arma::sp_cx_mat Psinglet;
 		arma::sp_cx_mat Ptriplet;
+		arma::sp_cx_mat Psinglet_t;
+		arma::sp_cx_mat Ptriplet_t;
+		arma::sp_cx_mat Psinglet_dag;
+		arma::sp_cx_mat Ptriplet_dag;
 		double rate = 0.0;
 	};
 
@@ -50,6 +58,9 @@ namespace SpinAPI
 		arma::sp_cx_mat Sx;
 		arma::sp_cx_mat Sy;
 		arma::sp_cx_mat Sz;
+		arma::sp_cx_mat Sx_dag;
+		arma::sp_cx_mat Sy_dag;
+		arma::sp_cx_mat Sz_dag;
 		double rate1 = 0.0;
 		double rate2 = 0.0;
 		double rate3 = 0.0;
@@ -60,6 +71,7 @@ namespace SpinAPI
 		std::vector<HilbertRelaxationTerm> lindblad_terms;
 		std::vector<HilbertRelaxationDephasingTerm> dephasing_terms;
 		std::vector<HilbertRelaxationRandomFieldTerm> random_field_terms;
+		double random_field_rho_coeff = 0.0;
 	};
 
 	class SpinSpace

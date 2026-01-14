@@ -619,6 +619,10 @@ namespace SpinAPI
 			term.L = L;
 			term.R = R;
 			term.M = R * L;
+			term.L_dag = term.L.st();
+			term.R_t = term.R.t();
+			term.M_t = term.M.t();
+			term.M_dag = term.M.st();
 			term.rate = rate;
 			_out.lindblad_terms.push_back(term);
 			return true;
@@ -729,6 +733,10 @@ namespace SpinAPI
 				HilbertRelaxationDephasingTerm term;
 				term.Psinglet = Psinglet;
 				term.Ptriplet = Ptriplet;
+				term.Psinglet_t = Psinglet.t();
+				term.Ptriplet_t = Ptriplet.t();
+				term.Psinglet_dag = Psinglet.st();
+				term.Ptriplet_dag = Ptriplet.st();
 				term.rate = _operator->Rate1();
 				_out.dephasing_terms.push_back(term);
 				added = true;
@@ -761,10 +769,14 @@ namespace SpinAPI
 					term.Sx = Sx;
 					term.Sy = Sy;
 					term.Sz = Sz;
+					term.Sx_dag = Sx.st();
+					term.Sy_dag = Sy.st();
+					term.Sz_dag = Sz.st();
 					term.rate1 = rate1;
 					term.rate2 = rate2;
 					term.rate3 = rate3;
 					_out.random_field_terms.push_back(term);
+					_out.random_field_rho_coeff -= (rate1 + rate2 + rate3);
 					added = true;
 				}
 			}
@@ -818,14 +830,9 @@ namespace SpinAPI
 			if (term.rate == 0.0)
 				continue;
 
-			arma::sp_cx_mat R_t = term.R.t();
-			arma::sp_cx_mat L_dag = term.L.st();
-			arma::sp_cx_mat M_t = term.M.t();
-			arma::sp_cx_mat M_dag = term.M.st();
-
-			arma::cx_mat PB = R_t * _rho * L_dag;
-			arma::cx_mat PL = _rho * M_dag;
-			arma::cx_mat PR = M_t * _rho;
+			arma::cx_mat PB = term.R_t * _rho * term.L_dag;
+			arma::cx_mat PL = _rho * term.M_dag;
+			arma::cx_mat PR = term.M_t * _rho;
 			_out += term.rate * (PB - 0.5 * (PL + PR));
 		}
 
@@ -834,39 +841,30 @@ namespace SpinAPI
 			if (term.rate == 0.0)
 				continue;
 
-			arma::sp_cx_mat Ps_t = term.Psinglet.t();
-			arma::sp_cx_mat Pt_t = term.Ptriplet.t();
-			arma::sp_cx_mat Ps_dag = term.Psinglet.st();
-			arma::sp_cx_mat Pt_dag = term.Ptriplet.st();
-
-			_out += -term.rate * (Pt_t * _rho * Ps_dag + Ps_t * _rho * Pt_dag);
+			_out += -term.rate * (term.Ptriplet_t * _rho * term.Psinglet_dag + term.Psinglet_t * _rho * term.Ptriplet_dag);
 		}
 
 		if (!_cache.random_field_terms.empty())
 		{
-			double rho_coeff = 0.0;
 			for (const auto &term : _cache.random_field_terms)
 			{
 				if (term.rate1 != 0.0)
 				{
-					_out += term.rate1 * (term.Sx * _rho * term.Sx.st());
-					rho_coeff += -1.0 * term.rate1;
+					_out += term.rate1 * (term.Sx * _rho * term.Sx_dag);
 				}
 				if (term.rate2 != 0.0)
 				{
-					_out += term.rate2 * (term.Sy * _rho * term.Sy.st());
-					rho_coeff += -1.0 * term.rate2;
+					_out += term.rate2 * (term.Sy * _rho * term.Sy_dag);
 				}
 				if (term.rate3 != 0.0)
 				{
-					_out += term.rate3 * (term.Sz * _rho * term.Sz.st());
-					rho_coeff += -1.0 * term.rate3;
+					_out += term.rate3 * (term.Sz * _rho * term.Sz_dag);
 				}
 			}
 
-			if (rho_coeff != 0.0)
+			if (_cache.random_field_rho_coeff != 0.0)
 			{
-				_out += rho_coeff * _rho;
+				_out += _cache.random_field_rho_coeff * _rho;
 			}
 		}
 
