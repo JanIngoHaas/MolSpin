@@ -79,6 +79,7 @@ namespace SpinAPI
 	private:
 		// Implementation
 		bool useSuperspace;
+		bool useFullTensorRotation;
 		std::vector<spin_ptr> spins;
 		std::vector<interaction_ptr> interactions;
 		std::vector<transition_ptr> transitions;
@@ -335,6 +336,7 @@ namespace SpinAPI
 		// Settings for the spin space
 		// ------------------------------------------------
 		bool UseSuperoperatorSpace(bool);							// Determines whether all returned operators, etc. will be in superoperator-/Liouville-space
+		bool UseFullTensorRotation(bool);							// Determines whether rotated interaction tensors keep off-diagonal elements
 		bool SetReactionOperatorType(const ReactionOperatorType &); // Sets the type of reaction operator to be produced - NOTE: Only works in superspace
 		bool SetTime(double);										// Set the current time, used to set states from trajectories (provided the trajectories have "time" columns, otherwise first step is used)
 		bool SetTrajectoryStep(unsigned int);						// Set the current step to be used in all trajectories (trajectories with too few steps will use last step)

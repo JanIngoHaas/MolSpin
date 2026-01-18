@@ -5,6 +5,7 @@
 // (c) 2025 Quantum Biology and Computational Physics Group.
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
+#include <algorithm>
 #include <iostream>
 #include "TaskStaticHSDirectSpectra.h"
 #include "Transition.h"
@@ -41,7 +42,14 @@ namespace RunSection
 	// -----------------------------------------------------
 	// TaskStaticHSDirectSpectra Constructors and Destructor
 	// -----------------------------------------------------
-	TaskStaticHSDirectSpectra::TaskStaticHSDirectSpectra(const MSDParser::ObjectParser &_parser, const RunSection &_runsection) : BasicTask(_parser, _runsection), timestep(1.0), totaltime(1.0e+4), reactionOperators(SpinAPI::ReactionOperatorType::Haberkorn)
+	TaskStaticHSDirectSpectra::TaskStaticHSDirectSpectra(const MSDParser::ObjectParser &_parser, const RunSection &_runsection)
+		: BasicTask(_parser, _runsection),
+		  timestep(1.0),
+		  totaltime(1.0e+4),
+		  powderGammaPoints(1),
+		  powderFullSphere(true),
+		  fullTensorRotation(true),
+		  reactionOperators(SpinAPI::ReactionOperatorType::Haberkorn)
 	{
 	}
 
@@ -94,7 +102,12 @@ namespace RunSection
 			// Obtain a SpinSpace to describe the system
 			SpinAPI::SpinSpace space(*(*i));
 			space.UseSuperoperatorSpace(false);
+			space.UseFullTensorRotation(this->fullTensorRotation);
 			space.SetReactionOperatorType(this->reactionOperators);
+			if (this->fullTensorRotation)
+			{
+				this->Log() << "Full tensor rotation enabled (off-diagonal terms retained)." << std::endl;
+			}
 
 			std::string InitialState;
 			arma::cx_mat InitialStateVector;
@@ -586,6 +599,14 @@ namespace RunSection
 				{
 					this->Log() << "Using powder averaging with " << numPoints << " orientations." << std::endl;
 				}
+				if (this->powderGammaPoints > 1)
+				{
+					this->Log() << "Sampling gamma with " << this->powderGammaPoints << " points per orientation." << std::endl;
+				}
+				if (this->powderFullSphere)
+				{
+					this->Log() << "Using full-sphere powder grid." << std::endl;
+				}
 			}
 			else
 			{
@@ -702,6 +723,8 @@ namespace RunSection
 			}
 
 			size_t grid_size = grid.size();
+			const int gamma_points = (grid_size > 1) ? std::max(1, this->powderGammaPoints) : 1;
+			const double gamma_weight = 1.0 / static_cast<double>(gamma_points);
 			int nthreads = 1;
 #ifdef _OPENMP
 			nthreads = omp_get_max_threads();
@@ -775,12 +798,22 @@ namespace RunSection
 				double theta, phi, weight;
 				std::tie(theta, phi, weight) = grid_point;
 
-				arma::mat Rot_mat = arma::eye<arma::mat>(3, 3);
-				double gamma = 0.0;
-				if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
+				const double base_weight = weight;
+
+				for (int gamma_idx = 0; gamma_idx < gamma_points; ++gamma_idx)
 				{
-					this->Log() << "Failed to obtain rotation matrix for powder orientation." << std::endl;
-				}
+					double gamma = 0.0;
+					if (gamma_points > 1)
+					{
+						gamma = 2.0 * arma::datum::pi * (static_cast<double>(gamma_idx) + 0.5) / static_cast<double>(gamma_points);
+					}
+					double weight = base_weight * gamma_weight;
+
+					arma::mat Rot_mat = arma::eye<arma::mat>(3, 3);
+					if (!this->CreateRotationMatrix(phi, theta, gamma, Rot_mat))
+					{
+						this->Log() << "Failed to obtain rotation matrix for powder orientation." << std::endl;
+					}
 
 				arma::sp_cx_mat H;
 				if (hasH0list)
@@ -950,7 +983,7 @@ namespace RunSection
 					{
 						for (const auto &seq : Pulsesequence)
 						{
-							if (grid_num == 0)
+							if (grid_num == 0 && gamma_idx == 0)
 							{
 								this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
 							}
@@ -1138,7 +1171,7 @@ namespace RunSection
 
 					if (has_pulse_output && pulse_step_index != ExptValuesPulseOrientation.n_rows)
 					{
-						if (grid_num == 0)
+						if (grid_num == 0 && gamma_idx == 0)
 						{
 							this->Log() << "Warning: Pulse output step count mismatch. Expected " << ExptValuesPulseOrientation.n_rows
 										<< ", recorded " << pulse_step_index << "." << std::endl;
@@ -1243,7 +1276,7 @@ namespace RunSection
 					for (const auto &seq : Pulsesequence)
 					{
 						// Write which pulse in pulsesequence is calculating now
-						if (grid_num == 0)
+						if (grid_num == 0 && gamma_idx == 0)
 						{
 							this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
 						}
@@ -1373,7 +1406,7 @@ namespace RunSection
 
 				if (has_pulse_output && pulse_step_index != ExptValuesPulseOrientation.n_rows)
 				{
-					if (grid_num == 0)
+					if (grid_num == 0 && gamma_idx == 0)
 					{
 						this->Log() << "Warning: Pulse output step count mismatch. Expected " << ExptValuesPulseOrientation.n_rows
 									<< ", recorded " << pulse_step_index << "." << std::endl;
@@ -1478,7 +1511,7 @@ namespace RunSection
 				}
 				else if (method_timeevo)
 				{
-					if (grid_num == 0)
+					if (grid_num == 0 && gamma_idx == 0)
 					{
 						this->Log() << "Using robust matrix exponential propagator for time-independent Hamiltonian." << std::endl;
 					}
@@ -1541,6 +1574,7 @@ namespace RunSection
 
 					rho_integrated_partial[tid] += weight * X;
 				}
+			}
 			}
 
 			if (method_timeevo)
@@ -1784,6 +1818,18 @@ namespace RunSection
 			}
 		}
 
+		if (!this->Properties()->Get("powdergammapoints", this->powderGammaPoints))
+		{
+			this->Properties()->Get("powdergammastps", this->powderGammaPoints);
+		}
+		if (this->powderGammaPoints < 1)
+		{
+			this->powderGammaPoints = 1;
+		}
+
+		this->Properties()->Get("powderfullsphere", this->powderFullSphere);
+		this->Properties()->Get("fulltensorrotation", this->fullTensorRotation);
+
 		return true;
 	}
 
@@ -1823,9 +1869,18 @@ namespace RunSection
 		{
 			double index = static_cast<double>(i) + 0.5;
 
-			theta[i] = std::acos(1.0 - index / _Npoints);							// hemisphere
-			phi[i] = golden * index;												// hemisphere
-			weight[i] = std::sin(theta[i]) * 2 * arma::datum::pi / _Npoints; // 2 * pi for hemisphere
+			if (this->powderFullSphere)
+			{
+				theta[i] = std::acos(1.0 - 2.0 * index / _Npoints);
+				phi[i] = golden * index;
+				weight[i] = 4 * arma::datum::pi / _Npoints;
+			}
+			else
+			{
+				theta[i] = std::acos(1.0 - index / _Npoints);							// hemisphere
+				phi[i] = golden * index;												// hemisphere
+				weight[i] = 2 * arma::datum::pi / _Npoints;
+			}
 			_uniformGrid[i] = {theta[i], phi[i], weight[i]};
 		}
 

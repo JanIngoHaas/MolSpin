@@ -45,6 +45,9 @@ namespace RunSection
 		  linewidthDonor_mT(0.0),
 		  lineshape("gaussian"),
 		  powdersamplingpoints(0),
+		  powderGammaPoints(1),
+		  powderFullSphere(true),
+		  fullTensorRotation(true),
 		  electron1Name(""),
 		  electron2Name(""),
 		  fieldInteractionName(""),
@@ -79,6 +82,11 @@ namespace RunSection
 
 			SpinAPI::SpinSpace space(*(*i));
 			space.UseSuperoperatorSpace(false);
+			space.UseFullTensorRotation(this->fullTensorRotation);
+			if (this->fullTensorRotation)
+			{
+				this->Log() << "Full tensor rotation enabled (off-diagonal terms retained)." << std::endl;
+			}
 
 			// Build list of interactions to include in H0
 			std::vector<std::string> h0list = this->hamiltonianH0list;
@@ -178,6 +186,8 @@ namespace RunSection
 			// Build magnetization operators in the Hilbert space
 			arma::cx_mat Mx1;
 			arma::cx_mat Mx2;
+			arma::cx_mat My1;
+			arma::cx_mat My2;
 			arma::cx_mat Mp1;
 			arma::cx_mat Mm1;
 			arma::cx_mat Mp2;
@@ -188,6 +198,16 @@ namespace RunSection
 				continue;
 			}
 			if (!space.CreateOperator(arma::conv_to<arma::cx_mat>::from(electron2->Tx()), electron2, Mx2))
+			{
+				this->Log() << "Failed to build magnetization operator for electron \"" << electron2->Name() << "\"." << std::endl;
+				continue;
+			}
+			if (!space.CreateOperator(arma::conv_to<arma::cx_mat>::from(electron1->Ty()), electron1, My1))
+			{
+				this->Log() << "Failed to build magnetization operator for electron \"" << electron1->Name() << "\"." << std::endl;
+				continue;
+			}
+			if (!space.CreateOperator(arma::conv_to<arma::cx_mat>::from(electron2->Ty()), electron2, My2))
 			{
 				this->Log() << "Failed to build magnetization operator for electron \"" << electron2->Name() << "\"." << std::endl;
 				continue;
@@ -233,6 +253,15 @@ namespace RunSection
 					this->Log() << "Failed to obtain a uniform grid for powder averaging." << std::endl;
 					continue;
 				}
+				this->Log() << "Using powder averaging with " << numPoints << " orientations." << std::endl;
+				if (this->powderGammaPoints > 1)
+				{
+					this->Log() << "Sampling gamma with " << this->powderGammaPoints << " points per orientation." << std::endl;
+				}
+				if (this->powderFullSphere)
+				{
+					this->Log() << "Using full-sphere powder grid." << std::endl;
+				}
 			}
 			else
 			{
@@ -240,92 +269,122 @@ namespace RunSection
 				grid.emplace_back(0.0, 0.0, 1.0);
 				numPoints = 1;
 			}
+			const int gamma_points = (numPoints > 1) ? std::max(1, this->powderGammaPoints) : 1;
+			const double gamma_weight = 1.0 / static_cast<double>(gamma_points);
 
-			double total_intensity = 0.0;
-			double fad_intensity = 0.0;
-			double donor_intensity = 0.0;
+			double total_intensity_x = 0.0;
+			double total_intensity_y = 0.0;
+			double fadx_intensity = 0.0;
+			double donorx_intensity = 0.0;
+			double fady_intensity = 0.0;
+			double donory_intensity = 0.0;
 			double fadp_intensity = 0.0;
 			double fadm_intensity = 0.0;
 			double donorp_intensity = 0.0;
 			double donorm_intensity = 0.0;
 
 			#ifdef _OPENMP
-			#pragma omp parallel for reduction(+ : total_intensity, fad_intensity, donor_intensity, fadp_intensity, fadm_intensity, donorp_intensity, donorm_intensity)
+			#pragma omp parallel for reduction(+ : total_intensity_x, total_intensity_y, fadx_intensity, donorx_intensity, fady_intensity, donory_intensity, fadp_intensity, fadm_intensity, donorp_intensity, donorm_intensity)
 			#endif
 			for (int grid_num = 0; grid_num < numPoints; ++grid_num)
 			{
 				auto [theta, phi, weight] = grid[grid_num];
 
-				arma::mat Rot_mat;
-				double gamma = 0.0;
-				if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
+				const double base_weight = weight;
+
+				for (int gamma_idx = 0; gamma_idx < gamma_points; ++gamma_idx)
 				{
-					continue;
-				}
-
-				arma::sp_cx_mat H0_sp;
-				if (!space.BaseHamiltonianRotated(h0list, Rot_mat, H0_sp))
-				{
-					continue;
-				}
-
-				arma::cx_mat H = arma::cx_mat(H0_sp);
-				arma::vec eigval;
-				arma::cx_mat eigvec;
-				if (!arma::eig_sym(eigval, eigvec, H))
-				{
-					continue;
-				}
-
-				arma::cx_mat Udag = arma::trans(arma::conj(eigvec));
-				arma::cx_mat rho_eig = Udag * rho0 * eigvec;
-				arma::cx_mat Mx1_eig = Udag * Mx1 * eigvec;
-				arma::cx_mat Mx2_eig = Udag * Mx2 * eigvec;
-				arma::cx_mat Mp1_eig = Udag * Mp1 * eigvec;
-				arma::cx_mat Mm1_eig = Udag * Mm1 * eigvec;
-				arma::cx_mat Mp2_eig = Udag * Mp2 * eigvec;
-				arma::cx_mat Mm2_eig = Udag * Mm2 * eigvec;
-
-				double fad_local = 0.0;
-				double donor_local = 0.0;
-				double fadp_local = 0.0;
-				double fadm_local = 0.0;
-				double donorp_local = 0.0;
-				double donorm_local = 0.0;
-				const arma::uword dim = eigval.n_elem;
-
-				for (arma::uword m = 0; m < dim; ++m)
-				{
-					const double rho_mm = std::real(rho_eig(m, m));
-					for (arma::uword n = m + 1; n < dim; ++n)
+					double gamma = 0.0;
+					if (gamma_points > 1)
 					{
-						const double rho_nn = std::real(rho_eig(n, n));
-						const double population = rho_mm - rho_nn;
-						const double delta = (eigval(n) - eigval(m)) - omega_mw;
-
-						const double mx1 = std::norm(Mx1_eig(m, n));
-						const double mx2 = std::norm(Mx2_eig(m, n));
-						const double mp1 = std::norm(Mp1_eig(m, n));
-						const double mm1 = std::norm(Mm1_eig(m, n));
-						const double mp2 = std::norm(Mp2_eig(m, n));
-						const double mm2 = std::norm(Mm2_eig(m, n));
-
-						fad_local += population * mx1 * this->LineshapeValue(delta, linewidth_fad);
-						donor_local += population * mx2 * this->LineshapeValue(delta, linewidth_donor);
-						fadp_local += population * mp1 * this->LineshapeValue(delta, linewidth_fad);
-						fadm_local += population * mm1 * this->LineshapeValue(delta, linewidth_fad);
-						donorp_local += population * mp2 * this->LineshapeValue(delta, linewidth_donor);
-						donorm_local += population * mm2 * this->LineshapeValue(delta, linewidth_donor);
+						gamma = 2.0 * arma::datum::pi * (static_cast<double>(gamma_idx) + 0.5) / static_cast<double>(gamma_points);
 					}
-				}
+					double weight = base_weight * gamma_weight;
 
-				fad_intensity += weight * fad_local;
-				donor_intensity += weight * donor_local;
-				fadp_intensity += weight * fadp_local;
-				fadm_intensity += weight * fadm_local;
-				donorp_intensity += weight * donorp_local;
-				donorm_intensity += weight * donorm_local;
-				total_intensity += weight * (fad_local + donor_local);
+					arma::mat Rot_mat;
+					if (!this->CreateRotationMatrix(phi, theta, gamma, Rot_mat))
+					{
+						continue;
+					}
+
+					arma::sp_cx_mat H0_sp;
+					if (!space.BaseHamiltonianRotated(h0list, Rot_mat, H0_sp))
+					{
+						continue;
+					}
+
+					arma::cx_mat H = arma::cx_mat(H0_sp);
+					arma::vec eigval;
+					arma::cx_mat eigvec;
+					if (!arma::eig_sym(eigval, eigvec, H))
+					{
+						continue;
+					}
+
+					arma::cx_mat Udag = arma::trans(arma::conj(eigvec));
+					arma::cx_mat rho_eig = Udag * rho0 * eigvec;
+					arma::cx_mat Mx1_eig = Udag * Mx1 * eigvec;
+					arma::cx_mat Mx2_eig = Udag * Mx2 * eigvec;
+					arma::cx_mat My1_eig = Udag * My1 * eigvec;
+					arma::cx_mat My2_eig = Udag * My2 * eigvec;
+					arma::cx_mat Mp1_eig = Udag * Mp1 * eigvec;
+					arma::cx_mat Mm1_eig = Udag * Mm1 * eigvec;
+					arma::cx_mat Mp2_eig = Udag * Mp2 * eigvec;
+					arma::cx_mat Mm2_eig = Udag * Mm2 * eigvec;
+
+					double fadx_local = 0.0;
+					double donorx_local = 0.0;
+					double fady_local = 0.0;
+					double donory_local = 0.0;					
+					double fadp_local = 0.0;
+					double fadm_local = 0.0;
+					double donorp_local = 0.0;
+					double donorm_local = 0.0;
+					const arma::uword dim = eigval.n_elem;
+
+					for (arma::uword m = 0; m < dim; ++m)
+					{
+						const double rho_mm = std::real(rho_eig(m, m));
+						for (arma::uword n = m + 1; n < dim; ++n)
+						{
+							const double rho_nn = std::real(rho_eig(n, n));
+							const double population = rho_mm - rho_nn;
+							const double delta = (eigval(n) - eigval(m)) - omega_mw;
+
+							const double mx1 = std::norm(Mx1_eig(m, n));
+							const double mx2 = std::norm(Mx2_eig(m, n));
+							const double my1 = std::norm(My1_eig(m, n));
+							const double my2 = std::norm(My2_eig(m, n));							
+							const double mp1 = std::norm(Mp1_eig(m, n));
+							const double mm1 = std::norm(Mm1_eig(m, n));
+							const double mp2 = std::norm(Mp2_eig(m, n));
+							const double mm2 = std::norm(Mm2_eig(m, n));
+
+							fadx_local += population * mx1 * this->LineshapeValue(delta, linewidth_fad);
+							donorx_local += population * mx2 * this->LineshapeValue(delta, linewidth_donor);
+							fady_local += population * my1 * this->LineshapeValue(delta, linewidth_fad);
+							donory_local += population * my2 * this->LineshapeValue(delta, linewidth_donor);							
+							fadp_local += population * mp1 * this->LineshapeValue(delta, linewidth_fad);
+							fadm_local += population * mm1 * this->LineshapeValue(delta, linewidth_fad);
+							donorp_local += population * mp2 * this->LineshapeValue(delta, linewidth_donor);
+							donorm_local += population * mm2 * this->LineshapeValue(delta, linewidth_donor);
+						}
+					}
+
+					fadx_intensity += weight * fadx_local;
+					donorx_intensity += weight * donorx_local;
+
+					fady_intensity += weight * fady_local;
+					donory_intensity += weight * donory_local;
+
+					fadp_intensity += weight * fadp_local;
+					fadm_intensity += weight * fadm_local;
+					donorp_intensity += weight * donorp_local;
+					donorm_intensity += weight * donorm_local;
+
+					total_intensity_x += weight * (fadx_local + donorx_local);
+					total_intensity_y += weight * (fady_local + donory_local);
+				}
 			}
 
 			// Determine field strength for output
@@ -372,11 +431,11 @@ namespace RunSection
 			this->Data() << this->RunSettings()->CurrentStep() << " ";
 			this->Data() << this->RunSettings()->Time() << " ";
 			this->WriteStandardOutput(this->Data());
-			this->Data() << field_mT << " " << total_intensity << " " << fad_intensity << " " << donor_intensity
+			this->Data() << field_mT << " " << total_intensity_x << " " << total_intensity_y << " " << fadx_intensity << " " << donorx_intensity  << " " << fady_intensity << " " << donory_intensity
 						 << " " << fadp_intensity << " " << fadm_intensity << " " << donorp_intensity << " " << donorm_intensity << std::endl;
 		}
 
-		this->Data() << std::endl;
+		//this->Data() << std::endl;
 		return true;
 	}
 
@@ -440,9 +499,18 @@ namespace RunSection
 		{
 			double index = static_cast<double>(i) + 0.5;
 
-			theta[i] = std::acos(1.0 - index / _Npoints);
-			phi[i] = golden * index;
-			weight[i] = std::sin(theta[i]) * 2 * arma::datum::pi / _Npoints;
+			if (this->powderFullSphere)
+			{
+				theta[i] = std::acos(1.0 - 2.0 * index / _Npoints);
+				phi[i] = golden * index;
+				weight[i] = 4 * arma::datum::pi / _Npoints;
+			}
+			else
+			{
+				theta[i] = std::acos(1.0 - index / _Npoints);
+				phi[i] = golden * index;
+				weight[i] = 2 * arma::datum::pi / _Npoints;
+			}
 			_uniformGrid[i] = {theta[i], phi[i], weight[i]};
 		}
 
@@ -459,9 +527,12 @@ namespace RunSection
 		for (auto i = systems.cbegin(); i != systems.cend(); i++)
 		{
 			_stream << (*i)->Name() << ".Field_mT ";
-			_stream << (*i)->Name() << ".Total ";
-			_stream << (*i)->Name() << ".FAD ";
-			_stream << (*i)->Name() << ".Donor ";
+			_stream << (*i)->Name() << ".Total_x ";
+			_stream << (*i)->Name() << ".Total_y ";			
+			_stream << (*i)->Name() << ".FADx ";
+			_stream << (*i)->Name() << ".Donorx ";
+			_stream << (*i)->Name() << ".FADy ";
+			_stream << (*i)->Name() << ".Donory ";			
 			_stream << (*i)->Name() << ".FADp ";
 			_stream << (*i)->Name() << ".FADm ";
 			_stream << (*i)->Name() << ".Donorp ";
@@ -501,6 +572,18 @@ namespace RunSection
 		{
 			this->powdersamplingpoints = 0;
 		}
+
+		if (!this->Properties()->Get("powdergammapoints", this->powderGammaPoints))
+		{
+			this->Properties()->Get("powdergammastps", this->powderGammaPoints);
+		}
+		if (this->powderGammaPoints < 1)
+		{
+			this->powderGammaPoints = 1;
+		}
+
+		this->Properties()->Get("powderfullsphere", this->powderFullSphere);
+		this->Properties()->Get("fulltensorrotation", this->fullTensorRotation);
 
 		if (!this->Properties()->Get("electron1", this->electron1Name))
 		{

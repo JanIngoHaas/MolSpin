@@ -658,8 +658,11 @@ namespace SpinAPI
 				A = RFrame * A * RFrame.t();
 				// Rotate g-tensor to the lab frame
 				A = _rotationmatrix * A * _rotationmatrix.t();
-				// Keep only diagonal elements to prevent relaxation due to non-diagonal ones
-				A = A % arma::eye<arma::mat>(3, 3);
+				if (!this->useFullTensorRotation)
+				{
+					// Keep only diagonal elements to prevent relaxation due to non-diagonal ones
+					A = A % arma::eye<arma::mat>(3, 3);
+				}
 				tmp += Sx * field(0) * A(0, 0) + Sx * field(1) * A(0, 1) + Sx * field(2) * A(0, 2);
 				tmp += Sy * field(0) * A(1, 0) + Sy * field(1) * A(1, 1) + Sy * field(2) * A(1, 2);
 				tmp += Sz * field(0) * A(2, 0) + Sz * field(1) * A(2, 1) + Sz * field(2) * A(2, 2);
@@ -700,8 +703,11 @@ namespace SpinAPI
 						A = RFrame * A * RFrame.t();
 						// Rotate A-tensor to the lab frame
 						A = _rotationmatrix * A * _rotationmatrix.t();
-						//  Keep only diagonal elements to prevent relaxation due to non-diagonal ones
-						A = A % arma::eye<arma::mat>(3, 3);
+						if (!this->useFullTensorRotation)
+						{
+							// Keep only diagonal elements to prevent relaxation due to non-diagonal ones
+							A = A % arma::eye<arma::mat>(3, 3);
+						}
 						// Use the tensor to calculate the product S_1 * A * S_2
 						tmp += S1x * S2x * A(0, 0) + S1x * S2y * A(0, 1) + S1x * S2z * A(0, 2);
 						tmp += S1y * S2x * A(1, 0) + S1y * S2y * A(1, 1) + S1y * S2z * A(1, 2);

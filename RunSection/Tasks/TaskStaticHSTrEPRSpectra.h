@@ -15,6 +15,9 @@ namespace RunSection
 		double linewidthDonor_mT;
 		std::string lineshape;
 		int powdersamplingpoints;
+		int powderGammaPoints;
+		bool powderFullSphere;
+		bool fullTensorRotation;
 		std::string electron1Name;
 		std::string electron2Name;
 		std::string fieldInteractionName;

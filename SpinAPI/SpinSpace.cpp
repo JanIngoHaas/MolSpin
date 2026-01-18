@@ -32,34 +32,34 @@ namespace SpinAPI
 	// -----------------------------------------------------
 	// SpinSpace Constructors and Destructor
 	// -----------------------------------------------------
-	SpinSpace::SpinSpace() : useSuperspace(false), spins(), interactions(), transitions(), pulses(), time(0.0), trajectoryStep(0), useTrajectoryStep(false),
+	SpinSpace::SpinSpace() : useSuperspace(false), useFullTensorRotation(false), spins(), interactions(), transitions(), pulses(), time(0.0), trajectoryStep(0), useTrajectoryStep(false),
 							 reactionOperators(ReactionOperatorType::Haberkorn)
 	{
 	}
 
-	SpinSpace::SpinSpace(const spin_ptr &_spin) : useSuperspace(false), spins(), interactions(), transitions(), pulses(), time(0.0), trajectoryStep(0),
+	SpinSpace::SpinSpace(const spin_ptr &_spin) : useSuperspace(false), useFullTensorRotation(false), spins(), interactions(), transitions(), pulses(), time(0.0), trajectoryStep(0),
 												  useTrajectoryStep(false), reactionOperators(ReactionOperatorType::Haberkorn)
 	{
 		this->spins.push_back(_spin);
 	}
 
-	SpinSpace::SpinSpace(const std::vector<spin_ptr> &_spinlist) : useSuperspace(false), spins(_spinlist), interactions(), transitions(), pulses(), time(0.0),
+	SpinSpace::SpinSpace(const std::vector<spin_ptr> &_spinlist) : useSuperspace(false), useFullTensorRotation(false), spins(_spinlist), interactions(), transitions(), pulses(), time(0.0),
 																   trajectoryStep(0), useTrajectoryStep(false), reactionOperators(ReactionOperatorType::Haberkorn)
 	{
 	}
 
-	SpinSpace::SpinSpace(const std::shared_ptr<SpinSystem> &_system) : useSuperspace(false), spins(), interactions(), transitions(), pulses(), time(0.0),
+	SpinSpace::SpinSpace(const std::shared_ptr<SpinSystem> &_system) : useSuperspace(false), useFullTensorRotation(false), spins(), interactions(), transitions(), pulses(), time(0.0),
 																	   trajectoryStep(0), useTrajectoryStep(false), reactionOperators(ReactionOperatorType::Haberkorn)
 	{
 		this->Add(_system);
 	}
 
-	SpinSpace::SpinSpace(const SpinSystem &_system) : useSuperspace(false), spins(_system.Spins()), interactions(_system.Interactions()), transitions(_system.Transitions()), pulses(_system.Pulses()),
+	SpinSpace::SpinSpace(const SpinSystem &_system) : useSuperspace(false), useFullTensorRotation(false), spins(_system.Spins()), interactions(_system.Interactions()), transitions(_system.Transitions()), pulses(_system.Pulses()),
 													  time(0.0), trajectoryStep(0), useTrajectoryStep(false), reactionOperators(ReactionOperatorType::Haberkorn) // TODO: Use move rather than copy for _system.Spins
 	{
 	}
 
-	SpinSpace::SpinSpace(const SpinSpace &_space) : useSuperspace(_space.useSuperspace), spins(_space.spins), interactions(_space.interactions), transitions(_space.transitions), pulses(_space.pulses),
+	SpinSpace::SpinSpace(const SpinSpace &_space) : useSuperspace(_space.useSuperspace), useFullTensorRotation(_space.useFullTensorRotation), spins(_space.spins), interactions(_space.interactions), transitions(_space.transitions), pulses(_space.pulses),
 													time(_space.time), trajectoryStep(_space.trajectoryStep), useTrajectoryStep(_space.useTrajectoryStep),
 													reactionOperators(ReactionOperatorType::Haberkorn)
 	{
@@ -75,6 +75,7 @@ namespace SpinAPI
 	const SpinSpace &SpinSpace::operator=(const SpinSpace &_space)
 	{
 		this->useSuperspace = _space.useSuperspace;
+		this->useFullTensorRotation = _space.useFullTensorRotation;
 		this->spins = _space.spins;
 		this->interactions = _space.interactions;
 		this->transitions = _space.transitions;
@@ -144,6 +145,12 @@ namespace SpinAPI
 	bool SpinSpace::UseSuperoperatorSpace(bool _useSuperspace)
 	{
 		return (this->useSuperspace = _useSuperspace);
+	}
+
+	// Set whether rotated interactions keep off-diagonal tensor elements
+	bool SpinSpace::UseFullTensorRotation(bool _useFullTensorRotation)
+	{
+		return (this->useFullTensorRotation = _useFullTensorRotation);
 	}
 
 	// Sets the reaction operator type

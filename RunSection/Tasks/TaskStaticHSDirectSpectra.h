@@ -22,6 +22,9 @@ namespace RunSection
 
 		double timestep;
 		double totaltime;
+		int powderGammaPoints;
+		bool powderFullSphere;
+		bool fullTensorRotation;
 
 		SpinAPI::ReactionOperatorType reactionOperators;
 
