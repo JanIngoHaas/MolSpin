@@ -215,11 +215,6 @@ namespace SpinAPI
 				double D = _interaction->Dvalue();
 				double E = _interaction->Evalue();
 
-				if (std::abs(E) >= 1e-100 && std::abs(E) >= 1e-100)
-				{
-					std::cout << "D or E value for zero-field splitting was not found." << std::endl;
-				}
-				else
 				{
 					// Calculate Zfs interaction
 					//tmp = D * (Sz * Sz - ((1.00 / 3.00) * (*i)->S() * ((*i)->S() + 1))) + E * (Sx * Sx - Sy * Sy);
@@ -524,11 +519,6 @@ namespace SpinAPI
 				double D = _interaction->Dvalue();
 				double E = _interaction->Evalue();
 
-				if (std::abs(E) >= 1e-100 && std::abs(E) >= 1e-100)
-				{
-					std::cout << "D or E value for zero-field splitting was not found." << std::endl;
-				}
-				else
 				{
 					// Calculate Zfs interaction
 					//tmp = D * (Sz * Sz - ((1.00 / 3.00) * (*i)->S() * ((*i)->S() + 1))) + E * (Sx * Sx - Sy * Sy);
@@ -927,11 +917,6 @@ namespace SpinAPI
 				double D = _interaction->Dvalue();
 				double E = _interaction->Evalue();
 
-				if (std::abs(E) >= 1e-100 && std::abs(E) >= 1e-100)
-				{
-					std::cout << "D or E value for zero-field splitting was not found." << std::endl;
-				}
-				else
 				{
 					// Calculate Zfs interaction
 					//tmp = D * (Sz * Sz - ((1.00 / 3.00) * (*i)->S() * ((*i)->S() + 1))) + E * (Sx * Sx - Sy * Sy);
