@@ -26,7 +26,7 @@ namespace SpinAPI
 																		 trjHasTime(false), trjHasField(false), trjHasTensor(false), trjHasPrefactor(false), trjTime(0), trjFieldX(0), trjFieldY(0), trjFieldZ(0), trjPrefactor(0),
 																		 tdFrequency(1.0), tdPhase(0.0), tdAxis("0 0 1"), tdPerpendicularOscillation(false), tdInitialField({0, 0, 0}), tensorType(InteractionTensorType::Static), tdTimestep(0),
 																		 tdInitialTensor(3, 3, arma::fill::zeros), tdMinFreq(0.0), tdMaxFreq(0.0), tdFreqs(), tdAmps(), tdPhases(), tdComponents(0), tdRandOrients(false), tdThetas(), tdPhis(), tdCorrTime(0.0),
-																		 tdPrintTensor(false), tdPrintField(false), tdSeed(0), tdAutoseed(false), tdGenerator(1), framelist({0, 0, 0})  //, tdFreqs(3, 3, arma::fill::zeros)//, tdFreqs({0,0,0})
+																		 tdPrintTensor(false), tdPrintField(false), tdSeed(0), tdAutoseed(false), tdGenerator(1), framelist({0, 0, 0}), EnergyShift(true) //, tdFreqs(3, 3, arma::fill::zeros)//, tdFreqs({0,0,0})
 	{
 		// Is a trajectory specified?
 		std::string str;
@@ -104,6 +104,15 @@ namespace SpinAPI
 				double indvalue, inevalue;
 				this->Properties()->Get("dvalue", indvalue);
 				this->Properties()->Get("evalue", inevalue);
+				std::string shift;
+				if(this->Properties()->Get("energyshift", shift))
+				{
+					if(shift == "true")
+						this->EnergyShift = true;
+					else if(shift == "false")
+						this->EnergyShift = false;
+				}
+
 
 				this->dvalue = indvalue;
 				this->evalue = inevalue;
@@ -590,7 +599,7 @@ namespace SpinAPI
 																tdMinFreq(_interaction.tdMinFreq), tdMaxFreq(_interaction.tdMaxFreq), tdFreqs(_interaction.tdFreqs), tdAmps(_interaction.tdAmps), tdPhases(_interaction.tdPhases),
 																tdComponents(_interaction.tdComponents), tdRandOrients(_interaction.tdRandOrients), tdThetas(_interaction.tdThetas), tdPhis(_interaction.tdPhis), tdCorrTime(_interaction.tdCorrTime),
 																tdPrintTensor(_interaction.tdPrintTensor), tdPrintField(_interaction.tdPrintField), tdSeed(_interaction.tdSeed), tdAutoseed(_interaction.tdAutoseed), tdGenerator(_interaction.tdGenerator), BondLengths(_interaction.BondLengths), dist(_interaction.dist), tau(_interaction.tau), f(_interaction.f),
-																OriWeights(_interaction.OriWeights), Spacing(_interaction.Spacing)
+																OriWeights(_interaction.OriWeights), Spacing(_interaction.Spacing), EnergyShift(_interaction.EnergyShift)
 
 
 	{
@@ -609,6 +618,7 @@ namespace SpinAPI
 		this->field = _interaction.field;
 		this->dvalue = _interaction.dvalue;
 		this->evalue = _interaction.evalue;
+		this->EnergyShift = _interaction.EnergyShift;
 		this->hffield = _interaction.hffield;
 		this->orientations = _interaction.orientations;
 		this->BondLengths = _interaction.BondLengths;

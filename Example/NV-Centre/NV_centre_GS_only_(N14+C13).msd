@@ -15,6 +15,14 @@ SpinSystem GroundState
         tensor = isotropic(1.0);
     }
 
+    Spin C13
+    {
+        spin = 1/2;
+        type = nucleus;
+        tensor = isotropic(1.0);
+    }
+
+
 //Interactions
 
     Interaction zfs
@@ -39,6 +47,15 @@ SpinSystem GroundState
         prefactor = 0.035682426404996e-3;
     }
 
+    Interaction E1C13
+    {
+        type = hyperfine;
+        group1 = e1;
+        group2 = N14;
+        tensor = matrix("121.1 0 0; 0 121.1 0; 0 0 199.21"); //Mhz
+        prefactor = 0.035682426404996e-3;
+    }
+
     Interaction N14nqp
     {
         type = zfs;
@@ -56,17 +73,27 @@ SpinSystem GroundState
     {
         type = singlespin;
         spins = e1;
-        field = "0.0 0.0 0.102";
-        //field = "0.0 0.0 0.0";
+        //field = "0.0 0.0 0.102";
+        field = "0.0 0.0 0.0";
     }
     
     Interaction nuclearzeeman
     {
         type = singlespin;
         spins = N14;
-        field = "0.0 0.0 0.102";
-        //field = "0.0 0.0 0.0";
+        //field = "0.0 0.0 0.102";
+        field = "0.0 0.0 0.0";
         prefactor = -0.019327078; //g_n = 3.076Mhz/T -> 19.327078Mrad/sT -> 0.019327078rad/(ns)T
+        commonprefactor = false;
+    }
+
+    Interaction nuclearzeeman2
+    {
+        type = singlespin;
+        spins = N14;
+        //field = "0.0 0.0 0.102";
+        field = "0.0 0.0 0.0";
+        prefactor = 0.06725521553; 
         commonprefactor = false;
     }
 
@@ -106,7 +133,7 @@ Run
         type = eigenvalues;
         Hamiltonian = true;
         logfile = "eigenvalues_gs_Z.log";
-        datafile = "../../results/eigenvalues_gs_Z.dat";
+        datafile = "../../results/eigenvalues_gs(N14+C13)_Z.dat";
         //datafile = "eigenvalues_gs_Z.dat";
     }
 }
@@ -129,8 +156,8 @@ Settings
 		type = addvector;
 		vector = GroundState.zeeman.field;
 		direction = "0 0 1";
-        value = 50e-9;
-        //value = 50e-6;
+        //value = 50e-9;
+        value = 50e-6;
 	}
 
     Action increasefieldstrength2
@@ -138,7 +165,16 @@ Settings
 		type = addvector;
 		vector = GroundState.nuclearzeeman.field;
 		direction = "0 0 1"; 
-        value = 50e-9;
-        //value = 50e-6;
+        //value = 50e-9;
+        value = 50e-6;
+	}
+
+     Action increasefieldstrength3
+	{
+		type = addvector;
+		vector = GroundState.nuclearzeeman2.field;
+		direction = "0 0 1"; 
+        //value = 50e-9;
+        value = 50e-6;
 	}
 }
