@@ -603,6 +603,345 @@ namespace SpinAPI
 		return true;
 	}
 
+	// Hilbert-space relaxation operators cache builder
+	bool SpinSpace::RelaxationOperator(const operator_ptr &_operator, HilbertRelaxationCache &_out) const
+	{
+		if (_operator == nullptr || !_operator->IsValid())
+			return false;
+
+		if (this->useSuperspace)
+			return false;
+
+		auto add_lindblad = [&](const arma::sp_cx_mat &L, const arma::sp_cx_mat &R, double rate) {
+			if (rate == 0.0)
+				return false;
+			HilbertRelaxationTerm term;
+			term.L = L;
+			term.R = R;
+			term.M = R * L;
+			term.L_dag = term.L.st();
+			term.R_t = term.R.t();
+			term.M_t = term.M.t();
+			term.M_dag = term.M.st();
+			term.rate = rate;
+			_out.lindblad_terms.push_back(term);
+			return true;
+		};
+
+		bool added = false;
+
+		if (_operator->Type() == OperatorType::RelaxationLindblad)
+		{
+			auto spins = _operator->Spins();
+			for (auto i = spins.cbegin(); i != spins.cend(); i++)
+			{
+				if (!this->Contains(*i))
+					continue;
+
+				arma::sp_cx_mat Sx;
+				arma::sp_cx_mat Sy;
+				arma::sp_cx_mat Sz;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sx()), (*i), Sx) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sy()), (*i), Sy) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sz()), (*i), Sz))
+				{
+					continue;
+				}
+
+				added = add_lindblad(Sx, Sx.t(), _operator->Rate1()) || added;
+				added = add_lindblad(Sy, Sy.t(), _operator->Rate2()) || added;
+				added = add_lindblad(Sz, Sz.t(), _operator->Rate3()) || added;
+			}
+		}
+		else if (_operator->Type() == OperatorType::RelaxationLindbladDoubleSpin)
+		{
+			auto spins = _operator->Spins();
+			std::vector<arma::sp_cx_mat> Sp_operators(spins.size());
+			std::vector<arma::sp_cx_mat> Sm_operators(spins.size());
+			std::vector<bool> valid(spins.size(), false);
+
+			for (size_t idx = 0; idx < spins.size(); ++idx)
+			{
+				if (!this->Contains(spins[idx]))
+					continue;
+
+				arma::sp_cx_mat Sp;
+				arma::sp_cx_mat Sm;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from(spins[idx]->Sp()), spins[idx], Sp) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from(spins[idx]->Sm()), spins[idx], Sm))
+				{
+					continue;
+				}
+
+				Sp_operators[idx] = Sp;
+				Sm_operators[idx] = Sm;
+				valid[idx] = true;
+			}
+
+			for (size_t i = 0; i < spins.size(); ++i)
+			{
+				if (!valid[i])
+					continue;
+
+				for (size_t j = 0; j < spins.size(); ++j)
+				{
+					if (i == j || !valid[j])
+						continue;
+
+					arma::sp_cx_mat L_minus = Sm_operators[i] * Sp_operators[j];
+					arma::sp_cx_mat L_plus = Sp_operators[i] * Sm_operators[j];
+
+					added = add_lindblad(L_minus, L_minus.t(), _operator->Rate1()) || added;
+					added = add_lindblad(L_plus, L_plus.t(), _operator->Rate1()) || added;
+				}
+			}
+		}
+		else if (_operator->Type() == OperatorType::RelaxationDephasing)
+		{
+			auto spins = _operator->Spins();
+			std::vector<arma::sp_cx_mat> Sx_operators;
+			std::vector<arma::sp_cx_mat> Sy_operators;
+			std::vector<arma::sp_cx_mat> Sz_operators;
+
+			for (auto i = spins.cbegin(); i != spins.cend(); i++)
+			{
+				if (!this->Contains(*i))
+					continue;
+
+				arma::sp_cx_mat Sx;
+				arma::sp_cx_mat Sy;
+				arma::sp_cx_mat Sz;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sx()), (*i), Sx) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sy()), (*i), Sy) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sz()), (*i), Sz))
+				{
+					continue;
+				}
+
+				Sx_operators.push_back(Sx);
+				Sy_operators.push_back(Sy);
+				Sz_operators.push_back(Sz);
+			}
+
+			if (Sx_operators.size() >= 2 && _operator->Rate1() != 0.0)
+			{
+				arma::sp_cx_mat E = arma::speye<arma::sp_cx_mat>(Sx_operators[0].n_rows, Sx_operators[0].n_cols);
+				arma::sp_cx_mat Psinglet = (1.0 / 4.0) * E -
+										   (Sx_operators[0] * Sx_operators[1] + Sy_operators[0] * Sy_operators[1] + Sz_operators[0] * Sz_operators[1]);
+				arma::sp_cx_mat Ptriplet = E - Psinglet;
+
+				HilbertRelaxationDephasingTerm term;
+				term.Psinglet = Psinglet;
+				term.Ptriplet = Ptriplet;
+				term.Psinglet_t = Psinglet.t();
+				term.Ptriplet_t = Ptriplet.t();
+				term.Psinglet_dag = Psinglet.st();
+				term.Ptriplet_dag = Ptriplet.st();
+				term.rate = _operator->Rate1();
+				_out.dephasing_terms.push_back(term);
+				added = true;
+			}
+		}
+		else if (_operator->Type() == OperatorType::RelaxationRandomFields)
+		{
+			auto spins = _operator->Spins();
+			for (auto i = spins.cbegin(); i != spins.cend(); i++)
+			{
+				if (!this->Contains(*i))
+					continue;
+
+				arma::sp_cx_mat Sx;
+				arma::sp_cx_mat Sy;
+				arma::sp_cx_mat Sz;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sx()), (*i), Sx) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sy()), (*i), Sy) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sz()), (*i), Sz))
+				{
+					continue;
+				}
+
+				double rate1 = _operator->Rate1();
+				double rate2 = _operator->Rate2();
+				double rate3 = _operator->Rate3();
+				if (rate1 != 0.0 || rate2 != 0.0 || rate3 != 0.0)
+				{
+					HilbertRelaxationRandomFieldTerm term;
+					term.Sx = Sx;
+					term.Sy = Sy;
+					term.Sz = Sz;
+					term.Sx_dag = Sx.st();
+					term.Sy_dag = Sy.st();
+					term.Sz_dag = Sz.st();
+					term.rate1 = rate1;
+					term.rate2 = rate2;
+					term.rate3 = rate3;
+					_out.random_field_terms.push_back(term);
+					_out.random_field_rho_coeff -= (rate1 + rate2 + rate3);
+					added = true;
+				}
+			}
+		}
+		else if (_operator->Type() == OperatorType::RelaxationT1)
+		{
+			auto spins = _operator->Spins();
+			for (auto i = spins.cbegin(); i != spins.cend(); i++)
+			{
+				if (!this->Contains(*i))
+					continue;
+
+				arma::sp_cx_mat Sp;
+				arma::sp_cx_mat Sm;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sp()), (*i), Sp) ||
+					!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sm()), (*i), Sm))
+				{
+					continue;
+				}
+
+				added = add_lindblad(Sp, Sm.t(), _operator->Rate1()) || added;
+			}
+		}
+		else if (_operator->Type() == OperatorType::RelaxationT2)
+		{
+			auto spins = _operator->Spins();
+			for (auto i = spins.cbegin(); i != spins.cend(); i++)
+			{
+				if (!this->Contains(*i))
+					continue;
+
+				arma::sp_cx_mat Sz;
+				if (!this->CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*i)->Sz()), (*i), Sz))
+				{
+					continue;
+				}
+
+				added = add_lindblad(Sz, Sz.t(), _operator->Rate1()) || added;
+			}
+		}
+
+		return added;
+	}
+
+	bool SpinSpace::ApplyRelaxationHilbert(const HilbertRelaxationCache &_cache, const arma::cx_mat &_rho, arma::cx_mat &_out) const
+	{
+		_out.zeros(_rho.n_rows, _rho.n_cols);
+
+		for (const auto &term : _cache.lindblad_terms)
+		{
+			if (term.rate == 0.0)
+				continue;
+
+			arma::cx_mat PB = term.R_t * _rho * term.L_dag;
+			arma::cx_mat PL = _rho * term.M_dag;
+			arma::cx_mat PR = term.M_t * _rho;
+			_out += term.rate * (PB - 0.5 * (PL + PR));
+		}
+
+		for (const auto &term : _cache.dephasing_terms)
+		{
+			if (term.rate == 0.0)
+				continue;
+
+			_out += -term.rate * (term.Ptriplet_t * _rho * term.Psinglet_dag + term.Psinglet_t * _rho * term.Ptriplet_dag);
+		}
+
+		if (!_cache.random_field_terms.empty())
+		{
+			for (const auto &term : _cache.random_field_terms)
+			{
+				if (term.rate1 != 0.0)
+				{
+					_out += term.rate1 * (term.Sx * _rho * term.Sx_dag);
+				}
+				if (term.rate2 != 0.0)
+				{
+					_out += term.rate2 * (term.Sy * _rho * term.Sy_dag);
+				}
+				if (term.rate3 != 0.0)
+				{
+					_out += term.rate3 * (term.Sz * _rho * term.Sz_dag);
+				}
+			}
+
+			if (_cache.random_field_rho_coeff != 0.0)
+			{
+				_out += _cache.random_field_rho_coeff * _rho;
+			}
+		}
+
+		return true;
+	}
+
+	bool SpinSpace::RelaxationSuperoperatorHilbert(const HilbertRelaxationCache &_cache, arma::cx_mat &_out) const
+	{
+		int dim = static_cast<int>(this->HilbertSpaceDimensions());
+		if (dim <= 0)
+			return false;
+
+		arma::cx_mat Iden = arma::eye<arma::cx_mat>(dim, dim);
+		_out.zeros(dim * dim, dim * dim);
+
+		for (const auto &term : _cache.lindblad_terms)
+		{
+			if (term.rate == 0.0)
+				continue;
+
+			arma::cx_mat L = arma::cx_mat(term.L);
+			arma::cx_mat R = arma::cx_mat(term.R);
+			arma::cx_mat M = arma::cx_mat(term.M);
+
+			arma::cx_mat L_conj = arma::conj(L);
+			arma::cx_mat R_t = R.t();
+			arma::cx_mat M_conj = arma::conj(M);
+			arma::cx_mat M_t = M.t();
+
+			_out += term.rate * (arma::kron(L_conj, R_t) -
+								 0.5 * (arma::kron(M_conj, Iden) + arma::kron(Iden, M_t)));
+		}
+
+		for (const auto &term : _cache.dephasing_terms)
+		{
+			if (term.rate == 0.0)
+				continue;
+
+			arma::cx_mat Ps = arma::cx_mat(term.Psinglet);
+			arma::cx_mat Pt = arma::cx_mat(term.Ptriplet);
+			arma::cx_mat Ps_conj = arma::conj(Ps);
+			arma::cx_mat Pt_conj = arma::conj(Pt);
+
+			_out += -term.rate * (arma::kron(Ps_conj, Pt.t()) + arma::kron(Pt_conj, Ps.t()));
+		}
+
+		double rho_coeff = 0.0;
+		for (const auto &term : _cache.random_field_terms)
+		{
+			if (term.rate1 != 0.0)
+			{
+				arma::cx_mat Sx = arma::cx_mat(term.Sx);
+				_out += term.rate1 * arma::kron(arma::conj(Sx), Sx);
+				rho_coeff += -1.0 * term.rate1;
+			}
+			if (term.rate2 != 0.0)
+			{
+				arma::cx_mat Sy = arma::cx_mat(term.Sy);
+				_out += term.rate2 * arma::kron(arma::conj(Sy), Sy);
+				rho_coeff += -1.0 * term.rate2;
+			}
+			if (term.rate3 != 0.0)
+			{
+				arma::cx_mat Sz = arma::cx_mat(term.Sz);
+				_out += term.rate3 * arma::kron(arma::conj(Sz), Sz);
+				rho_coeff += -1.0 * term.rate3;
+			}
+		}
+
+		if (rho_coeff != 0.0)
+		{
+			_out.diag() += rho_coeff;
+		}
+
+		return true;
+	}
+
 	// --------------------------------------------------------------
 	// Relaxation operators when a unitary transformation is required
 	// --------------------------------------------------------------

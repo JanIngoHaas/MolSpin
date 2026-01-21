@@ -31,11 +31,56 @@
 
 namespace SpinAPI
 {
+	struct HilbertRelaxationTerm
+	{
+		arma::sp_cx_mat L;
+		arma::sp_cx_mat R;
+		arma::sp_cx_mat M;
+		arma::sp_cx_mat L_dag;
+		arma::sp_cx_mat R_t;
+		arma::sp_cx_mat M_t;
+		arma::sp_cx_mat M_dag;
+		double rate = 0.0;
+	};
+
+	struct HilbertRelaxationDephasingTerm
+	{
+		arma::sp_cx_mat Psinglet;
+		arma::sp_cx_mat Ptriplet;
+		arma::sp_cx_mat Psinglet_t;
+		arma::sp_cx_mat Ptriplet_t;
+		arma::sp_cx_mat Psinglet_dag;
+		arma::sp_cx_mat Ptriplet_dag;
+		double rate = 0.0;
+	};
+
+	struct HilbertRelaxationRandomFieldTerm
+	{
+		arma::sp_cx_mat Sx;
+		arma::sp_cx_mat Sy;
+		arma::sp_cx_mat Sz;
+		arma::sp_cx_mat Sx_dag;
+		arma::sp_cx_mat Sy_dag;
+		arma::sp_cx_mat Sz_dag;
+		double rate1 = 0.0;
+		double rate2 = 0.0;
+		double rate3 = 0.0;
+	};
+
+	struct HilbertRelaxationCache
+	{
+		std::vector<HilbertRelaxationTerm> lindblad_terms;
+		std::vector<HilbertRelaxationDephasingTerm> dephasing_terms;
+		std::vector<HilbertRelaxationRandomFieldTerm> random_field_terms;
+		double random_field_rho_coeff = 0.0;
+	};
+
 	class SpinSpace
 	{
 	private:
 		// Implementation
 		bool useSuperspace;
+		bool useFullTensorRotation;
 		std::vector<spin_ptr> spins;
 		std::vector<interaction_ptr> interactions;
 		std::vector<transition_ptr> transitions;
@@ -253,9 +298,12 @@ namespace SpinAPI
 		// ------------------------------------------------
 		// Relaxation operators (SpinSpace_relaxation.cpp)
 		// ------------------------------------------------
-		// NOTE: These operators can only be created in superoperator space!
+		// NOTE: Dense/sparse operators require superspace; use HilbertRelaxationCache for Hilbert-space propagation.
 		bool RelaxationOperator(const operator_ptr &, arma::cx_mat &) const;
 		bool RelaxationOperator(const operator_ptr &, arma::sp_cx_mat &) const;
+		bool RelaxationOperator(const operator_ptr &, HilbertRelaxationCache &) const;
+		bool ApplyRelaxationHilbert(const HilbertRelaxationCache &, const arma::cx_mat &, arma::cx_mat &) const;
+		bool RelaxationSuperoperatorHilbert(const HilbertRelaxationCache &, arma::cx_mat &) const;
 
 		// Same relaxation operators, but when unitary transformation of projection operators is required
 		bool RelaxationOperatorFrameChange(const operator_ptr &_operator, arma::cx_mat _rotationmatrix, arma::cx_mat &_out) const;
@@ -290,6 +338,7 @@ namespace SpinAPI
 		// Settings for the spin space
 		// ------------------------------------------------
 		bool UseSuperoperatorSpace(bool);							// Determines whether all returned operators, etc. will be in superoperator-/Liouville-space
+		bool UseFullTensorRotation(bool);							// Determines whether rotated interaction tensors keep off-diagonal elements
 		bool SetReactionOperatorType(const ReactionOperatorType &); // Sets the type of reaction operator to be produced - NOTE: Only works in superspace
 		bool SetTime(double);										// Set the current time, used to set states from trajectories (provided the trajectories have "time" columns, otherwise first step is used)
 		bool SetTrajectoryStep(unsigned int);						// Set the current step to be used in all trajectories (trajectories with too few steps will use last step)

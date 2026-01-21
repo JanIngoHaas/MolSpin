@@ -5,6 +5,7 @@
 // (c) 2025 Quantum Biology and Computational Physics Group.
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
+#include <algorithm>
 #include <iostream>
 #include "TaskStaticHSDirectSpectra.h"
 #include "Transition.h"
@@ -41,7 +42,14 @@ namespace RunSection
 	// -----------------------------------------------------
 	// TaskStaticHSDirectSpectra Constructors and Destructor
 	// -----------------------------------------------------
-	TaskStaticHSDirectSpectra::TaskStaticHSDirectSpectra(const MSDParser::ObjectParser &_parser, const RunSection &_runsection) : BasicTask(_parser, _runsection), timestep(1.0), totaltime(1.0e+4), reactionOperators(SpinAPI::ReactionOperatorType::Haberkorn)
+	TaskStaticHSDirectSpectra::TaskStaticHSDirectSpectra(const MSDParser::ObjectParser &_parser, const RunSection &_runsection)
+		: BasicTask(_parser, _runsection),
+		  timestep(1.0),
+		  totaltime(1.0e+4),
+		  powderGammaPoints(1),
+		  powderFullSphere(true),
+		  fullTensorRotation(true),
+		  reactionOperators(SpinAPI::ReactionOperatorType::Haberkorn)
 	{
 	}
 
@@ -53,7 +61,7 @@ namespace RunSection
 	// -----------------------------------------------------
 	bool TaskStaticHSDirectSpectra::RunLocal()
 	{
-		this->Log() << "Running method StaticHS_Direct_Yields." << std::endl;
+		this->Log() << "Running task StaticHS-Direct-Spectra." << std::endl;
 
 		// If this is the first step, write first part of header to the data file
 		if (this->RunSettings()->CurrentStep() == 1)
@@ -81,9 +89,9 @@ namespace RunSection
 					// Throws an error if the spins are not spin 1/2
 					if ((*l)->Multiplicity() != 2)
 					{
-						std::cout << (*l)->Multiplicity() << std::endl;
-						this->Log() << "SkippingSpin System \"" << (*i)->Name() << "\" as electron spins have the wrong multiplicity." << std::endl;
-						std::cout << "# ERROR: electron spins have to be spin 1/2! Skipping the SpinSystem." << std::endl;
+						this->Log() << "Skipping SpinSystem \"" << (*i)->Name()
+									<< "\" because electron spins must be spin 1/2 (multiplicity 2). Found multiplicity "
+									<< (*l)->Multiplicity() << "." << std::endl;
 						return 1;
 					}
 				}
@@ -94,7 +102,16 @@ namespace RunSection
 			// Obtain a SpinSpace to describe the system
 			SpinAPI::SpinSpace space(*(*i));
 			space.UseSuperoperatorSpace(false);
+			
+			this->Properties()->Get("powderfullsphere", this->powderFullSphere);
+		    this->Properties()->Get("fulltensorrotation", this->fullTensorRotation);
+			
+			space.UseFullTensorRotation(this->fullTensorRotation);
 			space.SetReactionOperatorType(this->reactionOperators);
+			if (this->fullTensorRotation)
+			{
+				this->Log() << "Full tensor rotation enabled (off-diagonal terms retained)." << std::endl;
+			}
 
 			std::string InitialState;
 			arma::cx_mat InitialStateVector;
@@ -150,8 +167,7 @@ namespace RunSection
 				}
 				else
 				{
-					std::cout << "# ERROR: Invalid initial state value! It is set to a Singlet state." << std::endl;
-					this->Log() << "Initial state is undefined. Setting it to a Singlet state" << std::endl;
+					this->Log() << "Invalid initial state value \"" << InitialState << "\". Using Singlet state." << std::endl;
 					arma::cx_mat SingletState(4, 1);
 					SingletState(0) = 0.0;
 					SingletState(1) = 1.0 / sqrt(2);
@@ -186,7 +202,6 @@ namespace RunSection
 			}
 
 			int Z = space.SpaceDimensions() / InitialStateVector.n_rows; // Size of the nuclear spin subspace
-			std::cout << "# Hilbert Space Size " << InitialStateVector.n_rows * Z << " x " << InitialStateVector.n_rows * Z << std::endl;
 			this->Log() << "Hilbert Space Size " << InitialStateVector.n_rows * Z << " x " << InitialStateVector.n_rows * Z << std::endl;
 			this->Log() << "Size of Nuclear Spin Subspace " << Z << std::endl;
 
@@ -204,13 +219,15 @@ namespace RunSection
 			bool CIDSP = false;
 			if (!this->Properties()->Get("cidsp", CIDSP))
 			{
-				this->Log() << "Failed to obtain an input for a CIDSP" << std::endl;
+				this->Log() << "Failed to obtain input for CIDSP. Using default false." << std::endl;
 			}
 
-			// Get projectors of interest of the spectrum
-			arma::sp_cx_mat Iprojx;
-			arma::sp_cx_mat Iprojy;
-			arma::sp_cx_mat Iprojz;
+		// Get projectors of interest of the spectrum
+		arma::sp_cx_mat Iprojx;
+		arma::sp_cx_mat Iprojy;
+		arma::sp_cx_mat Iprojz;
+		arma::sp_cx_mat Iprojp;
+		arma::sp_cx_mat Iprojm;
 
 			std::vector<std::string> spinList;
 			int m;
@@ -243,7 +260,17 @@ namespace RunSection
 							{
 								return false;
 							}
-								if (!space.CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*l)->Sz()), (*l), Iprojz))
+							if (!space.CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*l)->Sz()), (*l), Iprojz))
+							{
+								return false;
+							}
+
+							if (!space.CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*l)->Sp()), (*l), Iprojp))
+							{
+								return false;
+							}
+
+							if (!space.CreateOperator(arma::conv_to<arma::sp_cx_mat>::from((*l)->Sm()), (*l), Iprojm))
 							{
 								return false;
 							}
@@ -257,7 +284,6 @@ namespace RunSection
 										continue;
 									if (!space.GetState((*j)->SourceState(), P))
 									{
-										std::cout << "# ERROR: Could not obtain projection matrix!" << std::endl;
 										this->Log() << "Failed to obtain projection matrix onto state \"" << (*j)->Name() << "\" of SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
 										return 1;
 									}
@@ -272,6 +298,10 @@ namespace RunSection
 									projection_counter += 1;
 									Operators[projection_counter] = (*j)->Rate() * Iprojz * P;
 									projection_counter += 1;
+									Operators[projection_counter] = (*j)->Rate() * Iprojp * P;
+									projection_counter += 1;
+									Operators[projection_counter] = (*j)->Rate() * Iprojm * P;
+									projection_counter += 1;
 
 									rates(num_transitions) = (*j)->Rate();
 									num_transitions++;
@@ -285,6 +315,10 @@ namespace RunSection
 								Operators[projection_counter] = Iprojy;
 								projection_counter += 1;
 								Operators[projection_counter] = Iprojz;
+								projection_counter += 1;
+								Operators[projection_counter] = Iprojp;
+								projection_counter += 1;
+								Operators[projection_counter] = Iprojm;
 								projection_counter += 1;
 							
 								for (auto j = transitions.cbegin(); j != transitions.cend(); j++)
@@ -343,6 +377,21 @@ namespace RunSection
 
 			arma::cx_mat Binitial = B;
 
+			SpinAPI::HilbertRelaxationCache relaxation_cache;
+			bool use_density_matrix = false;
+			for (auto j = (*i)->operators_cbegin(); j != (*i)->operators_cend(); j++)
+			{
+				if (space.RelaxationOperator((*j), relaxation_cache))
+				{
+					use_density_matrix = true;
+					this->Log() << "Added relaxation operator \"" << (*j)->Name() << "\" to Hilbert-space propagation.\n";
+				}
+			}
+			if (use_density_matrix)
+			{
+				this->Log() << "Relaxation operators detected. Using density-matrix propagation in Hilbert space." << std::endl;
+			}
+
 			// Setting or calculating total time.
 			double totaltime = this->totaltime;
 			double inputTotaltime = 0.0;
@@ -370,8 +419,7 @@ namespace RunSection
 				}
 				else
 				{
-					std::cout << "# WARNING: undefined timestep, using by default 0.1 ns!" << std::endl;
-					this->Log() << "# WARNING: undefined timestep, using by default 0.1 ns!" << std::endl;
+					this->Log() << "WARNING: Undefined timestep. Using default 0.1 ns." << std::endl;
 					dt = 0.1;
 				}
 			}
@@ -384,7 +432,7 @@ namespace RunSection
 			if (num_steps == 0)
 			{
 				num_steps = 1;
-				this->Log() << "change Number of propagation steps to: " << num_steps << " in order to propagate one step." << std::endl;
+				this->Log() << "Changing number of propagation steps to: " << num_steps << " in order to propagate one step." << std::endl;
 			}
 
 			// Choose Propagation Method and other parameters
@@ -417,8 +465,7 @@ namespace RunSection
 				}
 				else
 				{
-					std::cout << "# ERROR: undefined precision. Using single digit precision!" << std::endl;
-					this->Log() << "No precision for autoexpm method was defined. Using single digit precision." << std::endl;
+					this->Log() << "Undefined precision for autoexpm method. Using single precision." << std::endl;
 					precision = "single";
 				}
 			}
@@ -433,14 +480,12 @@ namespace RunSection
 					}
 					else
 					{
-						std::cout << "# ERROR: undefined tolerance for krylov subspace propagation! Using the default of 1e-16." << std::endl;
 						this->Log() << "Undefined tolerance for the krylov subspace. Using the default of 1e-16." << std::endl;
 						krylovtol = 1e-16;
 					}
 				}
 				else
 				{
-					std::cout << "# ERROR: undefined size of the krylov subspace! Using the default size of 16." << std::endl;
 					this->Log() << "Undefined size of the krylov subspace. Using the default size of 16." << std::endl;
 					krylovsize = 16;
 					if (krylovtol > 0)
@@ -449,17 +494,39 @@ namespace RunSection
 					}
 					else
 					{
-						std::cout << "# ERROR: undefined tolerance for krylov subspace propagation! Using the default of 1e-16." << std::endl;
 						this->Log() << "Undefined tolerance for the krylov subspace. Using the default of 1e-16." << std::endl;
 						krylovtol = 1e-16;
 					}
 				}
 			}
+			else if (propmethod == "rk4" || propmethod == "explicit")
+			{
+				this->Log() << "Explicit RK4 is chosen as the propagation method." << std::endl;
+			}
 			else
 			{
-				std::cout << "# WARNING: Undefined propagation method, using normal exponential method." << std::endl; // autoexpm with single accuracy!" << std::endl;
-				this->Log() << "WARNING: Undefined propagation method, using normal exponential method." << std::endl;	 // autoexpm with single accuracy." << std::endl;
+				this->Log() << "WARNING: Undefined propagation method. Using normal exponential method." << std::endl;
 				propmethod = "normal";
+			}
+
+			bool relax_use_split_expm = false;
+			arma::cx_mat K_dense;
+			if (use_density_matrix)
+			{
+				relax_use_split_expm = (propmethod != "rk4" && propmethod != "explicit");
+				if (relax_use_split_expm)
+				{
+					K_dense = arma::cx_mat(K);
+					this->Log() << "Relaxation operators active; using split-exponential propagation (Hamiltonian expm + RK4 relaxation)." << std::endl;
+					if (propmethod != "normal")
+					{
+						this->Log() << "Note: propagationmethod is ignored for relaxation; use propagationmethod = rk4 to force explicit RK4." << std::endl;
+					}
+				}
+				else
+				{
+					this->Log() << "Relaxation operators active; using explicit RK4 density-matrix propagation." << std::endl;
+				}
 			}
 
 			// Powder averaging options (shared keywords with superspace powder task)
@@ -479,24 +546,75 @@ namespace RunSection
 				method_timeinf = false;
 			}
 
-			int numPoints = 1000;
-			if (!this->Properties()->Get("powdersamplingpoints", numPoints))
+			// Read if the result should be integrated or not.
+			bool integration = false;
+			if (!this->Properties()->Get("integration", integration))
 			{
-				this->Log() << "Failed to obtain an input for a number of sampling points. Plese use powdersamplingpoints = N. Using powdersamplingpoints = 1000 by default. " << std::endl;
+				this->Log() << "Failed to obtain input for integration. Please use integration = true/false. Using integration = false by default." << std::endl;
+			}
+
+			// Read integrationwindow from the input file
+			std::string Integrationwindow;
+			if (!this->Properties()->Get("integrationtimeframe", Integrationwindow))
+			{
+				this->Log() << "Failed to obtain input for integrationtimeframe. Please choose integrationtimeframe = pulse / freeevo / full. Using freeevo by default." << std::endl;
+				Integrationwindow = "freeevo";
+			}
+			this->Log() << "Timewindow for the propagation integration: " << Integrationwindow << std::endl;
+
+			// Read printtimeframe from the input file
+			std::string Timewindow;
+			if (!this->Properties()->Get("printtimeframe", Timewindow))
+			{
+				this->Log() << "Failed to obtain input for printtimeframe. Please choose printtimeframe = pulse / freeevo / full. Using full by default." << std::endl;
+				Timewindow = "full";
+			}
+			this->Log() << "Timewindow for the propagation printing: " << Timewindow << std::endl;
+
+			bool print_pulses = (Timewindow.compare("freeevo") != 0);
+			bool print_freeevo = (Timewindow.compare("pulse") != 0);
+			bool integrate_pulses = integration && (Integrationwindow.compare("freeevo") != 0);
+			bool integrate_freeevo = integration && (Integrationwindow.compare("pulse") != 0);
+
+			int numPoints = 0;
+			bool hasPowderPoints = this->Properties()->Get("powdersamplingpoints", numPoints);
+			if (!hasPowderPoints)
+			{
+				this->Log() << "No powdersamplingpoints provided. Powder averaging is disabled by default." << std::endl;
+				numPoints = 0;
 			}
 			if (numPoints < 1)
 			{
-				numPoints = 1;
+				numPoints = 0;
+				if (hasPowderPoints)
+				{
+					this->Log() << "Powder averaging disabled (powdersamplingpoints <= 0)." << std::endl;
+				}
 			}
 
 			std::vector<std::tuple<double, double, double>> grid;
-			if (!this->CreateUniformGrid(numPoints, grid))
+			if (numPoints > 0)
 			{
-				this->Log() << "Failed to obtain a powder grid." << std::endl;
+				if (!this->CreateUniformGrid(numPoints, grid))
+				{
+					this->Log() << "Failed to obtain a powder grid." << std::endl;
+				}
+				else if (numPoints > 1)
+				{
+					this->Log() << "Using powder averaging with " << numPoints << " orientations." << std::endl;
+				}
+				if (this->powderGammaPoints > 1)
+				{
+					this->Log() << "Sampling gamma with " << this->powderGammaPoints << " points per orientation." << std::endl;
+				}
+				if (this->powderFullSphere)
+				{
+					this->Log() << "Using full-sphere powder grid." << std::endl;
+				}
 			}
-			else if (numPoints > 1)
+			else
 			{
-				this->Log() << "Using powder averaging with " << numPoints << " orientations." << std::endl;
+				grid.push_back({0.0, 0.0, 1.0});
 			}
 
 			std::vector<std::string> HamiltonianH0list;
@@ -509,7 +627,81 @@ namespace RunSection
 			bool hasPulseSequence = this->Properties()->GetPulseSequence("pulsesequence", Pulsesequence);
 			if (hasPulseSequence)
 			{
-				this->Log() << "Pulsesequence" << std::endl;
+				this->Log() << "Pulse sequence:" << std::endl;
+			}
+
+			std::vector<double> pulse_times;
+			std::vector<double> pulse_dts;
+			bool has_pulse_output = false;
+			bool pulse_has_initial_step = false;
+			double pulse_total_time = 0.0;
+			if (print_pulses && hasPulseSequence)
+			{
+				double current_time = 0.0;
+				bool include_initial_step = true;
+
+				for (const auto &seq : Pulsesequence)
+				{
+					std::string pulse_name = std::get<0>(seq);
+					double timerelaxation = std::get<1>(seq);
+
+					SpinAPI::pulse_ptr pulse_ptr = nullptr;
+					for (auto pulse = (*i)->pulses_cbegin(); pulse < (*i)->pulses_cend(); pulse++)
+					{
+						if ((*pulse)->Name().compare(pulse_name) == 0)
+						{
+							pulse_ptr = *pulse;
+							break;
+						}
+					}
+
+					if (pulse_ptr == nullptr)
+					{
+						this->Log() << "Pulse \"" << pulse_name << "\" was not found in SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
+						continue;
+					}
+
+					double pulse_dt = pulse_ptr->Timestep();
+					if (!std::isfinite(pulse_dt) || pulse_dt <= 0.0)
+					{
+						this->Log() << "Invalid timestep for pulse \"" << pulse_name << "\". Skipping pulse timeline generation." << std::endl;
+						continue;
+					}
+
+					if (pulse_ptr->Type() == SpinAPI::PulseType::LongPulseStaticField || pulse_ptr->Type() == SpinAPI::PulseType::LongPulse)
+					{
+						unsigned int steps = static_cast<unsigned int>(std::abs(pulse_ptr->Pulsetime() / pulse_dt));
+
+						if (include_initial_step)
+						{
+							pulse_times.push_back(current_time);
+							pulse_dts.push_back(0.0);
+							include_initial_step = false;
+						}
+
+						for (unsigned int n = 1; n <= steps; ++n)
+						{
+							current_time += pulse_dt;
+							pulse_times.push_back(current_time);
+							pulse_dts.push_back(pulse_dt);
+						}
+					}
+
+					if (timerelaxation != 0.0)
+					{
+						unsigned int steps = static_cast<unsigned int>(std::abs(timerelaxation / pulse_dt));
+						for (unsigned int n = 1; n <= steps; ++n)
+						{
+							current_time += pulse_dt;
+							pulse_times.push_back(current_time);
+							pulse_dts.push_back(pulse_dt);
+						}
+					}
+				}
+
+				pulse_total_time = current_time;
+				has_pulse_output = !pulse_times.empty();
+				pulse_has_initial_step = has_pulse_output && (pulse_dts.front() == 0.0);
 			}
 
 			arma::vec time;
@@ -535,6 +727,8 @@ namespace RunSection
 			}
 
 			size_t grid_size = grid.size();
+			const int gamma_points = (grid_size > 1) ? std::max(1, this->powderGammaPoints) : 1;
+			const double gamma_weight = 1.0 / static_cast<double>(gamma_points);
 			int nthreads = 1;
 #ifdef _OPENMP
 			nthreads = omp_get_max_threads();
@@ -547,6 +741,16 @@ namespace RunSection
 				for (auto &m : ExptValuesPartial)
 				{
 					m.zeros(num_steps, projection_counter);
+				}
+			}
+
+			std::vector<arma::mat> ExptValuesPulsePartial;
+			if (has_pulse_output)
+			{
+				ExptValuesPulsePartial.resize(nthreads);
+				for (auto &m : ExptValuesPulsePartial)
+				{
+					m.zeros(pulse_times.size(), projection_counter);
 				}
 			}
 
@@ -566,6 +770,12 @@ namespace RunSection
 			{
 				int dim = InitialStateVector.n_rows * Z;
 				Iden_dense = arma::eye<arma::cx_mat>(dim, dim);
+			}
+
+			arma::cx_mat relaxation_super;
+			if (method_timeinf && use_density_matrix)
+			{
+				space.RelaxationSuperoperatorHilbert(relaxation_cache, relaxation_super);
 			}
 
 			SpinAPI::SpinSpace base_space(space);
@@ -592,12 +802,22 @@ namespace RunSection
 				double theta, phi, weight;
 				std::tie(theta, phi, weight) = grid_point;
 
-				arma::mat Rot_mat = arma::eye<arma::mat>(3, 3);
-				double gamma = 0.0;
-				if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
+				const double base_weight = weight;
+
+				for (int gamma_idx = 0; gamma_idx < gamma_points; ++gamma_idx)
 				{
-					this->Log() << "Failed to obtain rotation matrix for powder orientation." << std::endl;
-				}
+					double gamma = 0.0;
+					if (gamma_points > 1)
+					{
+						gamma = 2.0 * arma::datum::pi * (static_cast<double>(gamma_idx) + 0.5) / static_cast<double>(gamma_points);
+					}
+					double weight = base_weight * gamma_weight;
+
+					arma::mat Rot_mat = arma::eye<arma::mat>(3, 3);
+					if (!this->CreateRotationMatrix(phi, theta, gamma, Rot_mat))
+					{
+						this->Log() << "Failed to obtain rotation matrix for powder orientation." << std::endl;
+					}
 
 				arma::sp_cx_mat H;
 				if (hasH0list)
@@ -627,23 +847,440 @@ namespace RunSection
 					if (!space_thread.Hamiltonian(H))
 					{
 						this->Log() << "Failed to obtain the Hamiltonian in Hilbert Space." << std::endl;
-						std::cout << "# ERROR: Failed to obtain the Hamiltonian!" << std::endl;
 						continue;
 					}
 				}
 
+				if (use_density_matrix)
+				{
+					arma::cx_mat rho = Binitial * Binitial.st();
+					int dim = static_cast<int>(rho.n_rows);
+
+					arma::cx_mat work_left(dim, dim, arma::fill::zeros);
+					arma::cx_mat work_right(dim, dim, arma::fill::zeros);
+					arma::cx_mat relax(dim, dim, arma::fill::zeros);
+					arma::cx_mat k1(dim, dim, arma::fill::zeros);
+					arma::cx_mat k2(dim, dim, arma::fill::zeros);
+					arma::cx_mat k3(dim, dim, arma::fill::zeros);
+					arma::cx_mat k4(dim, dim, arma::fill::zeros);
+					arma::cx_mat tmp_state(dim, dim, arma::fill::zeros);
+					arma::cx_mat rk_accum(dim, dim, arma::fill::zeros);
+
+					bool use_dense_H = false;
+					arma::cx_mat H_dense;
+					double H_density = 0.0;
+					if (relax_use_split_expm)
+					{
+						H_dense = arma::cx_mat(H);
+						use_dense_H = true;
+					}
+					else if (H.n_rows > 0 && H.n_cols > 0)
+					{
+						H_density = static_cast<double>(H.n_nonzero) / (static_cast<double>(H.n_rows) * static_cast<double>(H.n_cols));
+						if (H_density > 0.15)
+						{
+							H_dense = arma::cx_mat(H);
+							use_dense_H = true;
+						}
+					}
+
+					const arma::cx_double imag_unit(0.0, 1.0);
+
+					auto record_expectation_rho = [&](arma::mat &target, size_t row_index, const arma::cx_mat &state) {
+						for (int idx = 0; idx < projection_counter; ++idx)
+						{
+							double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], state) / Z)
+														: (std::real(arma::trace(OperatorsDense[idx] * state)) / Z);
+							target(row_index, idx) = val;
+						}
+					};
+
+					auto drho = [&](const arma::cx_mat &state, const arma::sp_cx_mat &H_total, const arma::cx_mat *H_dense_ptr, arma::cx_mat &out) {
+						if (H_dense_ptr != nullptr)
+						{
+							work_left = (*H_dense_ptr) * state;
+							work_right = state * (*H_dense_ptr);
+						}
+						else
+						{
+							work_left = H_total * state;
+							work_right = state * H_total;
+						}
+						out = -imag_unit * (work_left - work_right);
+						work_left = K * state;
+						work_right = state * K;
+						out -= (work_left + work_right);
+						space_thread.ApplyRelaxationHilbert(relaxation_cache, state, relax);
+						out += relax;
+					};
+
+					auto rk4_step = [&](arma::cx_mat &state, const arma::sp_cx_mat &H_total, const arma::cx_mat *H_dense_ptr, double step_dt) {
+						drho(state, H_total, H_dense_ptr, k1);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k1;
+						drho(tmp_state, H_total, H_dense_ptr, k2);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k2;
+						drho(tmp_state, H_total, H_dense_ptr, k3);
+						tmp_state = state;
+						tmp_state += step_dt * k3;
+						drho(tmp_state, H_total, H_dense_ptr, k4);
+						rk_accum = k1;
+						rk_accum += 2.0 * k2;
+						rk_accum += 2.0 * k3;
+						rk_accum += k4;
+						state += (step_dt / 6.0) * rk_accum;
+					};
+
+					auto relax_rhs = [&](const arma::cx_mat &state, arma::cx_mat &out) {
+						space_thread.ApplyRelaxationHilbert(relaxation_cache, state, out);
+					};
+
+					auto rk4_relax_step = [&](arma::cx_mat &state, double step_dt) {
+						relax_rhs(state, k1);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k1;
+						relax_rhs(tmp_state, k2);
+						tmp_state = state;
+						tmp_state += (0.5 * step_dt) * k2;
+						relax_rhs(tmp_state, k3);
+						tmp_state = state;
+						tmp_state += step_dt * k3;
+						relax_rhs(tmp_state, k4);
+						rk_accum = k1;
+						rk_accum += 2.0 * k2;
+						rk_accum += 2.0 * k3;
+						rk_accum += k4;
+						state += (step_dt / 6.0) * rk_accum;
+					};
+
+					auto build_unitary_half = [&](const arma::cx_mat &H_total_dense, double step_dt, arma::cx_mat &U_half, arma::cx_mat &U_half_st) {
+						arma::cx_mat A_dense = -imag_unit * H_total_dense - K_dense;
+						U_half = arma::expmat(A_dense * (0.5 * step_dt));
+						U_half_st = U_half.st();
+					};
+
+					auto apply_unitary_half = [&](arma::cx_mat &state, const arma::cx_mat &U_half, const arma::cx_mat &U_half_st) {
+						work_left = U_half * state;
+						state = work_left * U_half_st;
+					};
+
+					auto split_step = [&](arma::cx_mat &state, const arma::cx_mat &U_half, const arma::cx_mat &U_half_st, double step_dt) {
+						apply_unitary_half(state, U_half, U_half_st);
+						rk4_relax_step(state, step_dt);
+						apply_unitary_half(state, U_half, U_half_st);
+					};
+
+					size_t pulse_step_index = 0;
+					arma::mat ExptValuesPulseOrientation;
+					if (has_pulse_output)
+					{
+						ExptValuesPulseOrientation.zeros(pulse_times.size(), projection_counter);
+						if (pulse_has_initial_step)
+						{
+							record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+							pulse_step_index = 1;
+						}
+					}
+
+					if (hasPulseSequence)
+					{
+						for (const auto &seq : Pulsesequence)
+						{
+							if (grid_num == 0 && gamma_idx == 0)
+							{
+								this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
+							}
+
+							std::string pulse_name = std::get<0>(seq);
+							double timerelaxation = std::get<1>(seq);
+
+							for (auto pulse = (*i)->pulses_cbegin(); pulse < (*i)->pulses_cend(); pulse++)
+							{
+								if ((*pulse)->Name().compare(pulse_name) == 0)
+								{
+									double pulse_dt = (*pulse)->Timestep();
+									if (!std::isfinite(pulse_dt) || pulse_dt <= 0.0)
+									{
+										this->Log() << "Invalid timestep for pulse \"" << (*pulse)->Name() << "\". Skipping pulse propagation." << std::endl;
+										continue;
+									}
+
+									if ((*pulse)->Type() == SpinAPI::PulseType::InstantPulse)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+										arma::cx_mat U = arma::cx_mat(pulse_operator);
+										rho = U * rho * U.st();
+									}
+									else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulseStaticField)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+
+										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
+										if (relax_use_split_expm)
+										{
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator);
+											arma::cx_mat U_half;
+											arma::cx_mat U_half_st;
+											build_unitary_half(H_pulse_dense, pulse_dt, U_half, U_half_st);
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												split_step(rho, U_half, U_half_st, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else if (use_dense_H)
+										{
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator);
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H, &H_pulse_dense, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else
+										{
+											arma::sp_cx_mat H_pulse = H + pulse_operator;
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H_pulse, nullptr, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+									}
+									else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulse)
+									{
+										arma::sp_cx_mat pulse_operator;
+										if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
+										{
+											this->Log() << "Failed to create a pulse operator in HS." << std::endl;
+											continue;
+										}
+
+										double pulse_factor = std::cos((*pulse)->Frequency() * pulse_dt);
+										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
+										if (relax_use_split_expm)
+										{
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
+											arma::cx_mat U_half;
+											arma::cx_mat U_half_st;
+											build_unitary_half(H_pulse_dense, pulse_dt, U_half, U_half_st);
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												split_step(rho, U_half, U_half_st, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else if (use_dense_H)
+										{
+											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H, &H_pulse_dense, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else
+										{
+											arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
+											for (unsigned int n = 1; n <= steps; ++n)
+											{
+												rk4_step(rho, H_pulse, nullptr, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+									}
+									else
+									{
+										this->Log() << "Not implemented yet, sorry." << std::endl;
+									}
+
+									unsigned int relax_steps = static_cast<unsigned int>(std::abs(timerelaxation / pulse_dt));
+									if (relax_steps > 0)
+									{
+										if (relax_use_split_expm)
+										{
+											arma::cx_mat U_half;
+											arma::cx_mat U_half_st;
+											build_unitary_half(H_dense, pulse_dt, U_half, U_half_st);
+											for (unsigned int n = 1; n <= relax_steps; ++n)
+											{
+												split_step(rho, U_half, U_half_st, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+										else
+										{
+											for (unsigned int n = 1; n <= relax_steps; ++n)
+											{
+												rk4_step(rho, H, use_dense_H ? &H_dense : nullptr, pulse_dt);
+
+												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+												{
+													record_expectation_rho(ExptValuesPulseOrientation, pulse_step_index, rho);
+													++pulse_step_index;
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+
+					if (has_pulse_output && pulse_step_index != ExptValuesPulseOrientation.n_rows)
+					{
+						if (grid_num == 0 && gamma_idx == 0)
+						{
+							this->Log() << "Warning: Pulse output step count mismatch. Expected " << ExptValuesPulseOrientation.n_rows
+										<< ", recorded " << pulse_step_index << "." << std::endl;
+						}
+					}
+
+					arma::mat ExptValuesOrientation;
+					if (method_timeevo)
+					{
+						ExptValuesOrientation.zeros(num_steps, projection_counter);
+						if (relax_use_split_expm)
+						{
+							arma::cx_mat U_half;
+							arma::cx_mat U_half_st;
+							build_unitary_half(H_dense, dt, U_half, U_half_st);
+							for (int k = 0; k < num_steps; ++k)
+							{
+								record_expectation_rho(ExptValuesOrientation, k, rho);
+								split_step(rho, U_half, U_half_st, dt);
+							}
+						}
+						else
+						{
+							for (int k = 0; k < num_steps; ++k)
+							{
+								record_expectation_rho(ExptValuesOrientation, k, rho);
+								rk4_step(rho, H, use_dense_H ? &H_dense : nullptr, dt);
+							}
+						}
+					}
+
+					if (method_timeinf)
+					{
+						arma::cx_mat rho0mat = rho;
+						arma::cx_mat A_dense = -arma::cx_double(0.0, 1.0) * arma::cx_mat(H) - arma::cx_mat(K);
+						arma::cx_mat A_star = arma::conj(A_dense);
+
+						arma::cx_mat L = arma::kron(A_star, Iden_dense) + arma::kron(Iden_dense, A_dense);
+						if (!relaxation_super.is_empty())
+						{
+							L += relaxation_super;
+						}
+						arma::cx_vec rhs = arma::vectorise(-rho0mat);
+						arma::cx_vec sol = arma::solve(L, rhs);
+						if (sol.is_empty())
+						{
+							this->Log() << "Failed to solve timeinf Lyapunov equation in Hilbert space." << std::endl;
+							continue;
+						}
+						arma::cx_mat X = arma::reshape(sol, rho0mat.n_rows, rho0mat.n_cols);
+
+						rho_integrated_partial[tid] += weight * X;
+					}
+
+					if (has_pulse_output)
+						ExptValuesPulsePartial[tid] += weight * ExptValuesPulseOrientation;
+
+					if (method_timeevo)
+						ExptValuesPartial[tid] += weight * ExptValuesOrientation;
+
+					continue;
+				}
+
 				arma::cx_mat B = Binitial;
 
-				// Get pulses and pulse the system for this orientation (only for time evolution)
+				auto record_expectation = [&](arma::mat &target, size_t row_index, const arma::cx_mat &state) {
+					arma::cx_mat state_conj = arma::conj(state);
+					for (int idx = 0; idx < projection_counter; ++idx)
+					{
+						arma::cx_mat OB;
+						if (use_sparse_ops)
+						{
+							OB = OperatorsSparse[idx] * state;
+						}
+						else
+						{
+							OB = OperatorsDense[idx] * state;
+						}
+						double abs_trace = std::real(arma::accu(state_conj % OB));
+						target(row_index, idx) = abs_trace / Z;
+					}
+				};
+
+				size_t pulse_step_index = 0;
+				arma::mat ExptValuesPulseOrientation;
+				if (has_pulse_output)
+				{
+					ExptValuesPulseOrientation.zeros(pulse_times.size(), projection_counter);
+					if (pulse_has_initial_step)
+					{
+						record_expectation(ExptValuesPulseOrientation, pulse_step_index, B);
+						pulse_step_index = 1;
+					}
+				}
+
+				// Get pulses and pulse the system for this orientation
 				arma::sp_cx_mat A = arma::cx_double(0.0, -1.0) * H - K;
 
-				if (hasPulseSequence && method_timeevo)
+				if (hasPulseSequence)
 				{
 					// Loop through all pulse sequences
 					for (const auto &seq : Pulsesequence)
 					{
 						// Write which pulse in pulsesequence is calculating now
-						if (grid_num == 0)
+						if (grid_num == 0 && gamma_idx == 0)
 						{
 							this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
 						}
@@ -664,7 +1301,7 @@ namespace RunSection
 									arma::sp_cx_mat pulse_operator;
 									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
-										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
+										this->Log() << "Failed to create a pulse operator in HS." << std::endl;
 										continue;
 									}
 
@@ -678,7 +1315,7 @@ namespace RunSection
 									arma::sp_cx_mat pulse_operator;
 									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
-										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
+										this->Log() << "Failed to create a pulse operator in HS." << std::endl;
 										continue;
 									}
 
@@ -697,6 +1334,12 @@ namespace RunSection
 
 										// Get the new current state vector matrix
 										G.second = B;
+
+										if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+										{
+											record_expectation(ExptValuesPulseOrientation, pulse_step_index, B);
+											++pulse_step_index;
+										}
 									}
 								}
 								else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulse)
@@ -705,7 +1348,7 @@ namespace RunSection
 									arma::sp_cx_mat pulse_operator;
 									if (!space_thread.PulseOperatorOnStatevector((*pulse), pulse_operator))
 									{
-										this->Log() << "Failed to create a pulse operator in SS." << std::endl;
+										this->Log() << "Failed to create a pulse operator in HS." << std::endl;
 										continue;
 									}
 
@@ -724,6 +1367,12 @@ namespace RunSection
 
 										// Get the new current state density vector
 										G.second = B;
+
+										if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+										{
+											record_expectation(ExptValuesPulseOrientation, pulse_step_index, B);
+											++pulse_step_index;
+										}
 									}
 								}
 								else
@@ -747,9 +1396,24 @@ namespace RunSection
 
 									// Get the new current state density vector
 									G.second = B;
+
+									if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
+									{
+										record_expectation(ExptValuesPulseOrientation, pulse_step_index, B);
+										++pulse_step_index;
+									}
 								}
 							}
 						}
+					}
+				}
+
+				if (has_pulse_output && pulse_step_index != ExptValuesPulseOrientation.n_rows)
+				{
+					if (grid_num == 0 && gamma_idx == 0)
+					{
+						this->Log() << "Warning: Pulse output step count mismatch. Expected " << ExptValuesPulseOrientation.n_rows
+									<< ", recorded " << pulse_step_index << "." << std::endl;
 					}
 				}
 
@@ -851,7 +1515,7 @@ namespace RunSection
 				}
 				else if (method_timeevo)
 				{
-					if (grid_num == 0)
+					if (grid_num == 0 && gamma_idx == 0)
 					{
 						this->Log() << "Using robust matrix exponential propagator for time-independent Hamiltonian." << std::endl;
 					}
@@ -887,6 +1551,9 @@ namespace RunSection
 					}
 				}
 
+				if (has_pulse_output)
+					ExptValuesPulsePartial[tid] += weight * ExptValuesPulseOrientation;
+
 				if (method_timeevo)
 					ExptValuesPartial[tid] += weight * ExptValuesOrientation;
 				if (method_timeinf)
@@ -912,12 +1579,22 @@ namespace RunSection
 					rho_integrated_partial[tid] += weight * X;
 				}
 			}
+			}
 
 			if (method_timeevo)
 			{
 				for (auto &m : ExptValuesPartial)
 				{
 					ExptValues += m;
+				}
+			}
+			arma::mat ExptValuesPulse;
+			if (has_pulse_output)
+			{
+				ExptValuesPulse.zeros(pulse_times.size(), projection_counter);
+				for (auto &m : ExptValuesPulsePartial)
+				{
+					ExptValuesPulse += m;
 				}
 			}
 			if (method_timeinf)
@@ -928,93 +1605,124 @@ namespace RunSection
 				}
 			}
 
-			// Propagate the system in time using the specified method and write results
-			bool integration = false;
-			if (!this->Properties()->Get("integration", integration))
+			double time_offset = print_pulses ? pulse_total_time : 0.0;
+
+			if (has_pulse_output && print_pulses)
 			{
-				this->Log() << "Failed to obtain an input for an integtation. Plese use integration = true/false. Using integration = false by default. " << std::endl;
+				if (integrate_pulses)
+				{
+					this->Log() << "Writing integrated polarisation during pulse sequence." << std::endl;
+				}
+
+				arma::mat integrated_pulse;
+				if (integrate_pulses)
+				{
+					integrated_pulse.zeros(pulse_times.size(), projection_counter);
+					for (size_t k = 1; k < pulse_times.size(); ++k)
+					{
+						double dt_pulse = pulse_dts[k];
+						for (int idx = 0; idx < projection_counter; ++idx)
+						{
+							integrated_pulse(k, idx) = integrated_pulse(k - 1, idx) + dt_pulse * (ExptValuesPulse(k - 1, idx) + ExptValuesPulse(k, idx)) / 2.0;
+						}
+					}
+					if (!pulse_times.empty())
+					{
+						integrated_pulse.row(0) = ExptValuesPulse.row(0);
+					}
+				}
+
+				for (size_t k = 0; k < pulse_times.size(); ++k)
+				{
+					this->Data() << this->RunSettings()->CurrentStep() << " ";
+					this->Data() << std::setprecision(12) << pulse_times[k] << " ";
+					this->WriteStandardOutput(this->Data());
+
+					for (int idx = 0; idx < projection_counter; ++idx)
+					{
+						if (integrate_pulses)
+						{
+							this->Data() << " " << integrated_pulse(k, idx);
+						}
+						else
+						{
+							this->Data() << " " << ExptValuesPulse(k, idx);
+						}
+					}
+					this->Data() << std::endl;
+				}
 			}
 
 			if (method_timeinf)
 			{
-				this->Log() << "Writing time-integrated (time -> inf) polarisation." << std::endl;
-
-				this->Data() << this->RunSettings()->CurrentStep() << " ";
-				this->Data() << "inf"
-							 << " ";
-				this->WriteStandardOutput(this->Data());
-
-				for (int idx = 0; idx < projection_counter; idx++)
+				if (print_freeevo)
 				{
-					double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], rho_integrated) / Z)
-												: (std::real(arma::trace(OperatorsDense[idx] * rho_integrated)) / Z);
-					this->Data() << std::setprecision(12) << val << " ";
-				}
-				this->Data() << std::endl;
-			}
-			else if (integration)
-			{
-				this->Log() << "Writing integrated polarisation over time." << std::endl;
+					this->Log() << "Writing time-integrated (time -> inf) polarisation." << std::endl;
 
-				arma::mat integrated;
-				integrated.zeros(num_steps, projection_counter);
-
-				for (int k = 1; k < num_steps; ++k)
-				{
-					for (int idx = 0; idx < projection_counter; ++idx)
-					{
-						integrated(k, idx) = integrated(k - 1, idx) + dt * (ExptValues(k - 1, idx) + ExptValues(k, idx)) / 2.0;
-					}
-				}
-
-				if (num_steps > 0)
-				{
-					integrated.row(0) = ExptValues.row(0);
-				}
-
-				for (int k = 0; k < num_steps; k++)
-				{
 					this->Data() << this->RunSettings()->CurrentStep() << " ";
-					this->Data() << time(k) << " ";
+					this->Data() << "inf"
+								 << " ";
 					this->WriteStandardOutput(this->Data());
 
 					for (int idx = 0; idx < projection_counter; idx++)
 					{
-						this->Data() << " " << integrated(k, idx);
+						double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], rho_integrated) / Z)
+													: (std::real(arma::trace(OperatorsDense[idx] * rho_integrated)) / Z);
+						this->Data() << std::setprecision(12) << val << " ";
 					}
 					this->Data() << std::endl;
 				}
 			}
-			else if (propmethod == "autoexpm" || propmethod == "krylov")
+			else if (method_timeevo && print_freeevo)
 			{
-				for (int k = 0; k < num_steps; k++)
+				if (integrate_freeevo)
 				{
-					// Obtain results
-					this->Data() << this->RunSettings()->CurrentStep() << " ";
-					this->Data() << time(k) << " ";
-					this->WriteStandardOutput(this->Data());
+					this->Log() << "Writing integrated polarisation over time." << std::endl;
 
-					for (int idx = 0; idx < projection_counter; idx++)
+					arma::mat integrated;
+					integrated.zeros(num_steps, projection_counter);
+
+					for (int k = 1; k < num_steps; ++k)
 					{
-						this->Data() << " " << ExptValues(k, idx);
+						for (int idx = 0; idx < projection_counter; ++idx)
+						{
+							integrated(k, idx) = integrated(k - 1, idx) + dt * (ExptValues(k - 1, idx) + ExptValues(k, idx)) / 2.0;
+						}
 					}
-					this->Data() << std::endl;
+
+					if (num_steps > 0)
+					{
+						integrated.row(0) = ExptValues.row(0);
+					}
+
+					for (int k = 0; k < num_steps; k++)
+					{
+						this->Data() << this->RunSettings()->CurrentStep() << " ";
+						this->Data() << std::setprecision(12) << time_offset + time(k) << " ";
+						this->WriteStandardOutput(this->Data());
+
+						for (int idx = 0; idx < projection_counter; idx++)
+						{
+							this->Data() << " " << integrated(k, idx);
+						}
+						this->Data() << std::endl;
+					}
 				}
-			}
-			else
-			{
-				for (int k = 0; k < num_steps; ++k)
+				else
 				{
-					// Write results
-					this->Data() << this->RunSettings()->CurrentStep() << " ";
-					this->Data() << time(k) << " ";
-					this->WriteStandardOutput(this->Data());
-
-					for (int idx = 0; idx < projection_counter; ++idx)
+					for (int k = 0; k < num_steps; k++)
 					{
-						this->Data() << " " << ExptValues(k, idx);
+						// Write results
+						this->Data() << this->RunSettings()->CurrentStep() << " ";
+						this->Data() << std::setprecision(12) << time_offset + time(k) << " ";
+						this->WriteStandardOutput(this->Data());
+
+						for (int idx = 0; idx < projection_counter; idx++)
+						{
+							this->Data() << " " << ExptValues(k, idx);
+						}
+						this->Data() << std::endl;
 					}
-					this->Data() << std::endl;
 				}
 			}
 
@@ -1061,22 +1769,28 @@ namespace RunSection
 								auto transitions = (*i)->Transitions();
 								for (auto j = transitions.cbegin(); j != transitions.cend(); j++)
 								{
-									_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
-											<< ".Ix ";
-									_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
-											<< ".Iy ";
-									_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
-											<< ".Iz ";
+										_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
+												<< ".Ix ";
+										_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
+												<< ".Iy ";
+										_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
+												<< ".Iz ";
+										_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
+												<< ".Ip ";
+										_stream << (*i)->Name() << "." << (*l)->Name() << "." << (*j)->Name() << ".yield"
+												<< ".Im ";
+									}
 								}
-							}
-							else
-							{
-								// Write each state name
-								auto states = (*i)->States();
-								_stream << (*i)->Name() << "." << (*l)->Name() << ".Ix ";
-								_stream << (*i)->Name() << "." << (*l)->Name() << ".Iy ";
-								_stream << (*i)->Name() << "." << (*l)->Name() << ".Iz ";
-							}
+								else
+								{
+									// Write each state name
+									auto states = (*i)->States();
+									_stream << (*i)->Name() << "." << (*l)->Name() << ".Ix ";
+									_stream << (*i)->Name() << "." << (*l)->Name() << ".Iy ";
+									_stream << (*i)->Name() << "." << (*l)->Name() << ".Iz ";
+									_stream << (*i)->Name() << "." << (*l)->Name() << ".Ip ";
+									_stream << (*i)->Name() << "." << (*l)->Name() << ".Im ";
+								}
 						}
 					}
 				}
@@ -1107,6 +1821,18 @@ namespace RunSection
 				this->Log() << "Warning: Unknown reaction operator type specified. Using default reaction operators." << std::endl;
 			}
 		}
+
+		if (!this->Properties()->Get("powdergammapoints", this->powderGammaPoints))
+		{
+			this->Properties()->Get("powdergammastps", this->powderGammaPoints);
+		}
+		if (this->powderGammaPoints < 1)
+		{
+			this->powderGammaPoints = 1;
+		}
+
+		this->Properties()->Get("powderfullsphere", this->powderFullSphere);
+		this->Properties()->Get("fulltensorrotation", this->fullTensorRotation);
 
 		return true;
 	}
@@ -1147,9 +1873,18 @@ namespace RunSection
 		{
 			double index = static_cast<double>(i) + 0.5;
 
-			theta[i] = std::acos(1.0 - index / _Npoints);							// hemisphere
-			phi[i] = golden * index;												// hemisphere
-			weight[i] = std::sin(theta[i]) * 2 * arma::datum::pi / _Npoints; // 2 * pi for hemisphere
+			if (this->powderFullSphere)
+			{
+				theta[i] = std::acos(1.0 - 2.0 * index / _Npoints);
+				phi[i] = golden * index;
+				weight[i] = 4 * arma::datum::pi / _Npoints;
+			}
+			else
+			{
+				theta[i] = std::acos(1.0 - index / _Npoints);							// hemisphere
+				phi[i] = golden * index;												// hemisphere
+				weight[i] = 2 * arma::datum::pi / _Npoints;
+			}
 			_uniformGrid[i] = {theta[i], phi[i], weight[i]};
 		}
 
