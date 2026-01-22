@@ -325,6 +325,7 @@ namespace RunSection
 	bool TaskStaticSS::Validate()
 	{
 		this->Properties()->Get("transitionyields", this->productYieldsOnly);
+		this->name = TaskName::STATICSS;
 
 		// Get the reacton operator type
 		std::string str;

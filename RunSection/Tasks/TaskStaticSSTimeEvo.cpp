@@ -445,6 +445,7 @@ namespace RunSection
 	{
 		double inputTimestep = 0.0;
 		double inputTotaltime = 0.0;
+		this->name = TaskName::STATICSS_TIMEVO;
 
 		// Get timestep
 		if (this->Properties()->Get("timestep", inputTimestep))

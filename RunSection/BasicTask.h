@@ -40,6 +40,14 @@ namespace RunSection
 		RK45 = 3
 	};
 
+	enum class TaskName //currently used to verify what tasks support SW
+	{
+		DEFULAT = 0, 
+		//add tasknames below here
+		STATICSS = 1,
+		STATICSS_TIMEVO
+	};
+
 	struct TimeEvoProperties
 	{
 		Propagator prop;
@@ -93,6 +101,7 @@ namespace RunSection
 		bool Vector(std::string _name, ActionVector **_vector = nullptr);
 
 		Propagator prop;
+		TaskName name;
 		
 		//semi classical 
 		virtual void GetSamples(std::vector<arma::sp_cx_mat>&, arma::sp_cx_mat&, std::vector<SCData>&, std::vector<std::vector<double>>&, std::vector<std::vector<std::vector<double>>>&);

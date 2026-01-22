@@ -38,7 +38,7 @@ namespace RunSection
 	// BasicTask Constructors and Destructor
 	// -----------------------------------------------------
 	BasicTask::BasicTask(const MSDParser::ObjectParser &_properties, const RunSection &_runsection) : properties(std::make_shared<MSDParser::ObjectParser>(_properties)), runsection(_runsection), output(),
-																									  isValid(false), isValidated(false), scalars(nullptr), vectors(nullptr), usedScalars(), usedVectors()
+																									  isValid(false), isValidated(false), scalars(nullptr), vectors(nullptr), usedScalars(), usedVectors(), name(TaskName::DEFULAT)
 	{
 		if (!_runsection.noCalculations)
 		{
