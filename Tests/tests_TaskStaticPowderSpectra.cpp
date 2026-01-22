@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "Operator.h"
 #include "RunSection.h"
 #include "TaskStaticHSDirectSpectra.h"
 #include "TaskStaticSSPowderSpectra.h"
@@ -138,7 +139,24 @@ namespace
 			}
 
 			if (!row.empty())
-				_rows.push_back(row);
+			{
+				if (row.size() % 5 == 0)
+				{
+					std::vector<double> filtered;
+					filtered.reserve((row.size() / 5) * 3);
+					for (size_t idx = 0; idx < row.size(); idx += 5)
+					{
+						filtered.push_back(row[idx]);
+						filtered.push_back(row[idx + 1]);
+						filtered.push_back(row[idx + 2]);
+					}
+					_rows.push_back(filtered);
+				}
+				else
+				{
+					_rows.push_back(row);
+				}
+			}
 		}
 
 		return !_rows.empty();
@@ -358,6 +376,47 @@ bool test_task_staticpowder_timeevo_ss_hs_agree()
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// Time-evo: HS and SS should agree when relaxation operators are present.
+bool test_task_staticpowder_timeevo_relaxation_hs_ss_agree()
+{
+	auto system = BuildTwoElectronSystem(0.0, 0.0, 0.0, false, 0.0);
+	bool ok = PrepareSystem(system);
+
+	auto relax = std::make_shared<SpinAPI::Operator>(
+		"relax",
+		"type=relaxationrandomfields;spins=electron1,electron2;rate=0.2;");
+	system.spinsys->Add(relax);
+	ok &= (system.spinsys->ValidateOperators(system.spinsystems).size() == 0);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=electron1,electron2;powdersamplingpoints=1;"
+						"hamiltonianh0list=zeeman;hamiltonianh1list=zeeman;totaltime=0.95;timestep=0.1;";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() >= 6);
+	ok &= (hs_rows.front().size() >= 6);
+
+	double ss_decay = ss_rows.front()[2] - ss_rows.back()[2];
+	double hs_decay = hs_rows.front()[2] - hs_rows.back()[2];
+	ok &= (ss_decay > 1e-3);
+	ok &= (hs_decay > 1e-3);
+	ok &= RowsClose(ss_rows, hs_rows, 5e-4);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // Add all the test cases
 void AddTaskStaticPowderSpectraTests(std::vector<test_case> &_cases)
 {
@@ -365,4 +424,5 @@ void AddTaskStaticPowderSpectraTests(std::vector<test_case> &_cases)
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo constancy", test_task_staticpowder_timeevo_constant_no_drift));
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo integration", test_task_staticpowder_timeevo_integration_linear));
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo SS/HS agree", test_task_staticpowder_timeevo_ss_hs_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra timeevo relaxation HS/SS agree", test_task_staticpowder_timeevo_relaxation_hs_ss_agree));
 }
