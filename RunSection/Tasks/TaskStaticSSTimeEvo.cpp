@@ -182,7 +182,7 @@ namespace RunSection
 
 			// Get the Hamiltonian
 			arma::sp_cx_mat H;
-			if (!space.Hamiltonian(H))
+			if (!space.Hamiltonian(H, static_cast<int>(this->name)))
 			{
 				this->Log() << "Failed to obtain Hamiltonian in superspace." << std::endl;
 				continue;
