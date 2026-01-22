@@ -1935,8 +1935,15 @@ namespace RunSection
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; idx++)
 						{
-							arma::cx_vec tmp = use_sparse_ops ? (OperatorsSparseLocal[idx] * prop_state)
-															  : (OperatorsDenseLocal[idx] * prop_state);
+							arma::cx_vec tmp;
+							if (use_sparse_ops)
+							{
+								tmp = OperatorsSparseLocal[idx] * prop_state;
+							}
+							else
+							{
+								tmp = OperatorsDenseLocal[idx] * prop_state;
+							}
 							double result = std::abs(arma::cdot(prop_state, tmp));
 							ExptValuesOrientation(0, idx) += result;
 						}
@@ -1968,8 +1975,15 @@ namespace RunSection
 							// Calculate the expected values for each transition operator
 							for (int idx = 0; idx < projection_counter; idx++)
 							{
-								arma::cx_vec tmp = use_sparse_ops ? (OperatorsSparseLocal[idx] * prop_state)
-																  : (OperatorsDenseLocal[idx] * prop_state);
+								arma::cx_vec tmp;
+								if (use_sparse_ops)
+								{
+									tmp = OperatorsSparseLocal[idx] * prop_state;
+								}
+								else
+								{
+									tmp = OperatorsDenseLocal[idx] * prop_state;
+								}
 								double result = std::abs(arma::cdot(prop_state, tmp));
 								ExptValuesOrientation(k, idx) += result;
 							}
