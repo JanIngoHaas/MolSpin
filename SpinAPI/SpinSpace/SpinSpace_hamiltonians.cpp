@@ -1236,11 +1236,11 @@ namespace SpinAPI
 		  		if(std::abs(D) >= 1e-100)
 		  		{
 		  			int sn = (*i)->S() * 1.0/2.0;
-		  			double val = (1.00 / 3.00) * sn * (sn + 1);
-		  			arma::cx_mat energy_shift = arma::zeros<arma::cx_mat>(this->HilbertSpac
-		  			if(_interaction->ES())
-		  				energy_shift = val * arma::eye<arma::cx_mat>(this->HilbertSpaceDime
-		  			tmp += D * ((Sz * Sz) - energy_shift);
+					double val = (1.00 / 3.00) * sn * (sn + 1);
+					arma::cx_mat energy_shift = arma::zeros<arma::cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
+					if(_interaction->ES())
+						energy_shift = val * arma::eye<arma::cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
+					tmp += D * ((Sz * Sz) - energy_shift);
 		  		}
 		  		if(std::abs(E) >= 1e-100)
 		  		{
@@ -1253,22 +1253,22 @@ namespace SpinAPI
 		{
 			// Obtain lists of interacting spins, coupling tensor, and define matrices to h
 			auto spinlist = _interaction->Group1();
-					
+
 		
 			//  Grab amplitude and orientation parameters
 			const SCHyperfineField field = _interaction->Hfiamplitude()[0]; 
 			const auto[B,nu,sqn] = field;
 			const auto B0 = B[0][0];
-					
+
 		
 			const int n = _interaction->Orientations();		// averaging grid
-					
+
 		
 			// Build Sx, Sy, Sz for *each* electron in Group1
 			arma::sp_cx_mat Sx;
 			arma::sp_cx_mat Sy;
 			arma::sp_cx_mat Sz;
-					
+
 		
 			// Fill the matrix with the sum of all the interactions (i.e. between spin magn
 			for (auto i = spinlist.cbegin(); i != spinlist.cend(); i++)
