@@ -70,19 +70,19 @@ SpinSystem system1
 
     Interaction radical1hyperfineFADH6
     {
-		prefactor = 0.001;
-            type = hyperfine;
-            group1 = RPElectron1;
-            group2 = FADH6;
-		tensor = isotropic(1);
+		  prefactor = 0.001;
+      type = hyperfine;
+      group1 = RPElectron1;
+      group2 = FADH6;
+		  tensor = isotropic(1);
     }
 
     Interaction radical1hyperfineFADN5
     {
 		prefactor = 0.001;
-            type = hyperfine;
-            group1 = RPElectron1;
-            group2 = FADN5;
+    	type = hyperfine;
+        group1 = RPElectron1;
+        group2 = FADN5;
 		tensor = isotropic(1);
     }
  
@@ -90,9 +90,9 @@ SpinSystem system1
     Interaction radical1hyperfineFADN10
     {
 		prefactor = 0.001;
-            type = hyperfine;
-            group1 = RPElectron1;
-            group2 = FADN10;
+        type = hyperfine;
+        group1 = RPElectron1;
+        group2 = FADN10;
     }
 
 	Interaction test
@@ -146,13 +146,13 @@ SpinSystem system1
         // ---------------------------------------------------------
     	Transition Product1
         {
-                type = sink;
+    	        type = sink;
                 source = Singlet;
                 rate = 1e-05;
         }
 
         Transition Product2
-        {
+    	{
                 type = sink;
                 source = T0;
                 rate = 1e-05;
