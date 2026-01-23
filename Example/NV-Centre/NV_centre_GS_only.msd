@@ -84,9 +84,9 @@ SpinSystem GroundState
     State TP_Z    {spin(e1) = |1>; spin(N14) = |0>;}
     State TP_D    {spin(e1) = |1>; spin(N14) = |-1>;}
 
-    State TD_U    {spin(e1) = |0>; spin(N14) = |1>;}
-    State TD_Z    {spin(e1) = |0>; spin(N14) = |0>;}
-    State TD_D    {spin(e1) = |0>; spin(N14) = |-1>;}
+    State TD_U    {spin(e1) = |-1>; spin(N14) = |1>;}
+    State TD_Z    {spin(e1) = |-1>; spin(N14) = |0>;}
+    State TD_D    {spin(e1) = |-1>; spin(N14) = |-1>;}
 
     State Identity
     {
@@ -105,9 +105,10 @@ Run
     {
         type = eigenvalues;
         Hamiltonian = true;
+        refstates = T0_U, T0_Z, T0_D, TP_U, TP_Z, TP_D, TD_U, TD_Z, TD_D;
         logfile = "eigenvalues_gs_Z.log";
-        datafile = "../../results/eigenvalues_gs_Z.dat";
-        //datafile = "eigenvalues_gs_Z.dat";
+        //datafile = "../../results/eigenvalues_gs_Z.dat";
+        datafile = "eigenvalues_gs_Z.dat";
     }
 }
 
