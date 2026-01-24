@@ -790,9 +790,8 @@ namespace RunSection
 				}
 				this->Data() << std::setprecision(6) << ans(0, it) << " ";
 			}
-			this->Data() << std::endl;
 		}
-
+		this->Data() << std::endl;
 		return true;
 	}
 

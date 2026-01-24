@@ -722,11 +722,10 @@ namespace RunSection
 				}
 				this->Data() << std::setprecision(6) << ans(0, it) << " ";
 			}
-			this->Data() << std::endl;
 
 			this->Log() << "\nDone with SpinSystem \"" << (*i)->Name() << "\"" << std::endl;
 		}
-
+		this->Data() << std::endl;
 		return true;
 	}
 

@@ -817,7 +817,7 @@ namespace RunSection
 
 			for (int it = 0; it < num_transitions; it++)
 			{
-				if (correction & !time_dependent_transitions)
+				if (correction && !time_dependent_transitions)
 				{
 					// Quantum yields with correction factor
 					ans(0, it) = ans(0, it) * rates(it) / (1 - std::exp(-ttotal * kmax));
@@ -829,10 +829,8 @@ namespace RunSection
 				}
 				this->Data() << std::setprecision(6) << ans(0, it) << " ";
 			}
-
-			this->Data() << std::endl;
-
 		}
+		this->Data() << std::endl;
 		return true;
 	}
 	bool TaskDynamicHSDirectYields::is_identity_matrix(arma::sp_cx_mat &matrix)
