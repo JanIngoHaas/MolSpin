@@ -176,7 +176,7 @@ namespace RunSection
 		this->Data() << this->RunSettings()->CurrentStep() << " 0 ";
 		this->WriteStandardOutput(this->Data());
 		// There are two result modes - either write results per transition or for each defined state
-		bool nf = SeperateSpinSystems(rho0, spaces, this->ProductYieldsOnly);
+		// bool nf = SeperateSpinSystems(rho0, spaces, this->ProductYieldsOnly);
 		//nextDimension = 0;
 		//for (auto i = spaces.cbegin(); i != spaces.cend(); i++)
 		//{
