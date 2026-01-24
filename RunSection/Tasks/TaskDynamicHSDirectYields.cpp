@@ -830,20 +830,9 @@ namespace RunSection
 				this->Data() << std::setprecision(6) << ans(0, it) << " ";
 			}
 
-			// this->Data() << std::endl;
+			this->Data() << std::endl;
 
-			// This commented section bellow was only for testing purposes
-
-			// std::cout << std::endl;
-			// std::cout << "Quantum Yields:" << std::endl;
-			// std::cout << std::setprecision(6) <<  ans << std::endl;
-			// std::cout << std::endl;
-
-			// std::cout << "Accumulated sum of the quantum yields:" << std::endl;
-			// std::cout << std::setprecision(6) << arma::accu(ans) << std::endl;
-			// std::cout << std::endl;
 		}
-		this->Data() << std::endl;
 		return true;
 	}
 	bool TaskDynamicHSDirectYields::is_identity_matrix(arma::sp_cx_mat &matrix)
