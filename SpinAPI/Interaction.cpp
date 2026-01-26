@@ -77,21 +77,24 @@ namespace SpinAPI
 					this->type = InteractionType::SingleSpin;
 				}
 				std::vector<double> _framelist;
-				if (this->Properties()->GetList ("orientation", _framelist)) //change to euler angles 
+				if (this->Properties()->GetList("orientation", _framelist)) // change to euler angles
 				{
 					this->framelist = _framelist;
 				}
-
 			}
 			else if (str.compare("twospin") == 0 || str.compare("doublespin") == 0 || str.compare("hyperfine") == 0 || str.compare("dipole") == 0)
 			{
 				this->type = InteractionType::DoubleSpin;
 
 				std::vector<double> _framelist;
-				if (this->Properties()->GetList ("orientation", _framelist)) //""
+				if (this->Properties()->GetList("orientation", _framelist)) //""
 				{
 					this->framelist = _framelist;
 				}
+			}
+			else if (str.compare("quadraticspin") == 0)
+			{
+				this->type = InteractionType::QuadraticSpin;
 			}
 			else if (str.compare("exchange") == 0)
 			{
@@ -105,44 +108,43 @@ namespace SpinAPI
 				this->Properties()->Get("dvalue", indvalue);
 				this->Properties()->Get("evalue", inevalue);
 				std::string shift;
-				if(this->Properties()->Get("energyshift", shift))
+				if (this->Properties()->Get("energyshift", shift))
 				{
-					if(shift == "true")
+					if (shift == "true")
 						this->EnergyShift = true;
-					else if(shift == "false")
+					else if (shift == "false")
 						this->EnergyShift = false;
 				}
-
 
 				this->dvalue = indvalue;
 				this->evalue = inevalue;
 			}
 			else if (str.compare("semiclassicalfield") == 0)
 			{
-				this-> type = InteractionType::SemiClassicalField;
+				this->type = InteractionType::SemiClassicalField;
 
 				int inorientationsvalue;
 				this->Properties()->Get("orientations", inorientationsvalue);
 				this->orientations = inorientationsvalue;
 				std::string HFfieldStr;
-				this->Properties()->Get("hyperfinefield",HFfieldStr);
+				this->Properties()->Get("hyperfinefield", HFfieldStr);
 				std::vector<std::tuple<SCMatrix3x3, int, double>> HFfield;
 				bool InTuple = false;
 				int element = 0;
 				std::string CurrentString;
-				SCMatrix3x3 ZeroTensor = {{{0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0}}};
-				std::tuple<SCMatrix3x3,int,double> CurrentHfTensor = std::make_tuple(ZeroTensor,-1,-1.0); //{{{0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0}}, -1, -1.0};
+				SCMatrix3x3 ZeroTensor = {{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}};
+				std::tuple<SCMatrix3x3, int, double> CurrentHfTensor = std::make_tuple(ZeroTensor, -1, -1.0); //{{{0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0}}, -1, -1.0};
 				auto c = HFfieldStr.begin();
 				int depth = 0;
 				int validelements = 0;
-				while(c != HFfieldStr.end())
+				while (c != HFfieldStr.end())
 				{
-					if((*c) == '(' || (*c) == ')')
+					if ((*c) == '(' || (*c) == ')')
 					{
-						if((*c) == '(')
+						if ((*c) == '(')
 						{
 							depth += 1;
-							if(depth == 1)
+							if (depth == 1)
 							{
 								InTuple = true;
 								CurrentString = "";
@@ -155,7 +157,7 @@ namespace SpinAPI
 						else
 						{
 							depth -= 1;
-							if(depth == 0)
+							if (depth == 0)
 							{
 								InTuple = false;
 							}
@@ -164,7 +166,7 @@ namespace SpinAPI
 								CurrentString += (*c);
 							}
 						}
-						if(!InTuple && CurrentString != "")
+						if (!InTuple && CurrentString != "")
 						{
 							c = c - 1;
 							(*c) = ',';
@@ -172,75 +174,75 @@ namespace SpinAPI
 							depth = 1;
 							continue;
 						}
-						if(!InTuple && validelements < 3)
+						if (!InTuple && validelements < 3)
 						{
 							std::cout << "[INFO]: Not enough valid elements in hyperfine field definition for the semi classical interaction." << this->Name();
-							auto[a,n,s] = CurrentHfTensor;
+							auto [a, n, s] = CurrentHfTensor;
 							std::cout << " Ignoring the field defined as: " << a << " , " << n << " , " << s << "\n -1 is just used as a placeholder value " << std::endl;
-							CurrentHfTensor = std::make_tuple(ZeroTensor,-1,-1.0);
+							CurrentHfTensor = std::make_tuple(ZeroTensor, -1, -1.0);
 							validelements = 0;
 						}
-						if(!InTuple && validelements == 3)
+						if (!InTuple && validelements == 3)
 						{
 							HFfield.push_back(CurrentHfTensor);
-							CurrentHfTensor = std::make_tuple(ZeroTensor,-1,-1.0);
+							CurrentHfTensor = std::make_tuple(ZeroTensor, -1, -1.0);
 							validelements = 0;
 						}
 						element = 0;
-						c++;	
+						c++;
 					}
-					if(!InTuple && (*c) == ',')
+					if (!InTuple && (*c) == ',')
 					{
 						c++;
 						continue;
 					}
-					if(!InTuple && (*c) == ' ')
+					if (!InTuple && (*c) == ' ')
 					{
 						c++;
 						continue;
 					}
-					if(InTuple)
+					if (InTuple)
 					{
-						//depth check i.e if depth is 2 we are in tensor
-						if(depth == 2)
+						// depth check i.e if depth is 2 we are in tensor
+						if (depth == 2)
 						{
 							CurrentString += (*c);
 						}
-						else if((*c) != ',' && (*c) != ' ')
+						else if ((*c) != ',' && (*c) != ' ')
 						{
 							CurrentString += (*c);
 						}
-						if(depth == 1 && (*c) == ',')
+						if (depth == 1 && (*c) == ',')
 						{
-							//evaluate strings
+							// evaluate strings
 							if (element == 0)
 							{
-								//parse tensor
+								// parse tensor
 								SCMatrix3x3 parsedtensor;
 								bool valid = Parse3x3TensorLikeArrayFromString(CurrentString, parsedtensor);
 								std::get<0>(CurrentHfTensor) = parsedtensor;
-								if(valid)
+								if (valid)
 								{
 									validelements += 1;
 								}
 							}
-							else if(element == 1)
+							else if (element == 1)
 							{
 								int num = std::stoi(CurrentString);
 								std::get<1>(CurrentHfTensor) = num;
 								validelements += 1;
 							}
-							else if(element == 2)
+							else if (element == 2)
 							{
 
 								auto frac = [](std::string str)
 								{
-									std::string p1,p2;
-									std::string* cstr = &p1;
+									std::string p1, p2;
+									std::string *cstr = &p1;
 									auto c2 = str.begin();
 									while (c2 != str.end())
 									{
-										if((*c2) == '/' || (*c2) == '\\')
+										if ((*c2) == '/' || (*c2) == '\\')
 										{
 											cstr = &p2;
 											c2++;
@@ -250,10 +252,9 @@ namespace SpinAPI
 										c2++;
 									}
 									return std::stod(p1) / std::stod(p2);
-
 								};
 								double sn = 0.0;
-								if(std::find(CurrentString.begin(), CurrentString.end(), '/') != CurrentString.end())
+								if (std::find(CurrentString.begin(), CurrentString.end(), '/') != CurrentString.end())
 								{
 									sn = frac(CurrentString);
 								}
@@ -278,36 +279,33 @@ namespace SpinAPI
 				}
 				this->hffield = HFfield;
 
-				std::string distribution;  //slighty overkill as we only have one distribution 
-				if(!this->Properties()->Get("distribution",distribution) && !this->Properties()->Get("dist", distribution))
+				std::string distribution; // slighty overkill as we only have one distribution
+				if (!this->Properties()->Get("distribution", distribution) && !this->Properties()->Get("dist", distribution))
 				{
 					this->dist = SCDistribution::DEFUALT;
 				}
 				else
 				{
-					if(distribution == "fjc" || distribution == "freelyjointedchain")
+					if (distribution == "fjc" || distribution == "freelyjointedchain")
 					{
 						this->dist = SCDistribution::FJC;
 					}
 					else
 					{
-						this->dist = SCDistribution::DEFUALT; 
+						this->dist = SCDistribution::DEFUALT;
 					}
 				}
 
-				if(this->dist == SCDistribution::FJC || this->dist == SCDistribution::DEFUALT)
+				if (this->dist == SCDistribution::FJC || this->dist == SCDistribution::DEFUALT)
 				{
-					FreelyJointedPolymerBL(this->BondLengths,this->hffield, this->tau, this->orientations);
-					
-					double prefactor = this->tau * 0.25 * M_1_PI; //tua^2 / 4pi
-					prefactor = std::pow(prefactor,3.0/2.0);
-					double exp1 = -0.25  * this->tau;
-					this->f = FreelyJointedPolymerD(prefactor,exp1);
+					FreelyJointedPolymerBL(this->BondLengths, this->hffield, this->tau, this->orientations);
+
+					double prefactor = this->tau * 0.25 * M_1_PI; // tua^2 / 4pi
+					prefactor = std::pow(prefactor, 3.0 / 2.0);
+					double exp1 = -0.25 * this->tau;
+					this->f = FreelyJointedPolymerD(prefactor, exp1);
 				}
-
 			}
-
-
 		}
 
 		// If we have a valid interaction type, read the other parameters
@@ -578,15 +576,125 @@ namespace SpinAPI
 				this->SetTime(0.0);
 			}
 		}
+
+		// Quadratic-spin interactions can have a time-dependent tensor
+		if (this->type == InteractionType::QuadraticSpin)
+		{
+			// do we have a specified tensortype?
+			if (this->properties->Get("tensortype", str))
+			{
+				// some tensortypes require a seed to be specified for random number generation
+				if (str.compare("broadband") == 0 || str.compare("ougeneral") == 0)
+				{
+					// Random Number Generator Preparation
+					std::random_device rand_dev;						 // random number generator
+					this->tdGenerator.seed(rand_dev());					 // automatic seed
+					this->properties->Get("autoseed", this->tdAutoseed); // seed can also be specified by the user
+
+					if (!this->tdAutoseed)
+					{
+						std::cout << "Autoseed is off." << std::endl;
+						this->properties->Get("seed", this->tdSeed);
+						if (this->tdSeed != 0)
+						{
+							this->tdGenerator.seed(this->tdSeed);
+							std::cout << "Seed number is " << this->tdSeed << "." << std::endl;
+						}
+						else
+						{
+							std::cout << "# ERROR: undefined seed number in Interaction " << this->Name() << ". Setting to default of 1." << std::endl;
+							this->tdSeed = 1;
+						}
+					}
+				}
+
+				// Do we have a trajectory entry for tensor? Note that the trajectory may not have a time column, in which case there will be no time dependence
+				if (this->trjHasTensor)
+				{
+					this->tensorType = InteractionTensorType::Trajectory;
+					std::cout << "Warning: Ignored tensortype for Interaction \"" << this->Name() << "\"! Using trajectory instead." << std::endl;
+				}
+
+				// Figure out what type of time-dependence should be used
+				else if (str.compare("monochromatic") == 0)
+				{
+					this->tensorType = InteractionTensorType::Monochromatic;
+					this->properties->Get("frequency", this->tdFrequency);
+					this->properties->Get("phase", this->tdPhase);
+					this->properties->Get("printtensor", this->tdPrintTensor);
+				}
+				else if (str.compare("broadband") == 0)
+				{
+					this->tensorType = InteractionTensorType::Broadband;
+					this->properties->Get("minfreq", this->tdMinFreq);
+					this->properties->Get("maxfreq", this->tdMaxFreq);
+					this->properties->Get("components", this->tdComponents);
+					this->properties->Get("printtensor", this->tdPrintTensor);
+
+					// define all the distributions for broadband noise and fill out vectors
+					std::normal_distribution<double> amp_dist(0.0, 1.0);
+					std::uniform_real_distribution<double> phase_dist(0, 2.0 * M_PI);
+					std::uniform_real_distribution<double> freq_dist(this->tdMinFreq, this->tdMaxFreq);
+
+					this->tdAmps.set_size(this->tdComponents, 6);
+					this->tdFreqs.set_size(this->tdComponents, 6);
+					this->tdPhases.set_size(this->tdComponents, 6);
+
+					// generate all the required random numbers for the 6 unique tensor components
+					for (int j_tens = 0; j_tens < 6; j_tens++)
+					{
+						for (int i_comp = 0; i_comp < this->tdComponents; i_comp++)
+						{
+							double phase = phase_dist(this->tdGenerator);
+							double freq = freq_dist(this->tdGenerator);
+							double amp = amp_dist(this->tdGenerator);
+
+							this->tdPhases(i_comp, j_tens) = phase;
+							this->tdFreqs(i_comp, j_tens) = freq;
+							this->tdAmps(i_comp, j_tens) = amp;
+						}
+					}
+				}
+
+				else if (str.compare("ougeneral") == 0)
+				{
+					this->tensorType = InteractionTensorType::OUGeneral;
+					this->properties->Get("correlationtime", this->tdCorrTime);
+					this->properties->Get("timestep", this->tdTimestep);
+					this->properties->Get("printtensor", this->tdPrintTensor);
+				}
+
+				else
+				{
+					std::cout << "Warning: Unknown tensortype for Interaction \"" << this->Name() << "\"! Assuming static field." << std::endl;
+				}
+			}
+
+			// Set the time to 0 by default
+			if (this->HasTensorTimeDependence())
+			{
+				if (this->tensorType == InteractionTensorType::OUGeneral)
+				{
+					this->tdInitialTensor = couplingTensor->LabFrame();
+					arma::mat zeros(3, 3, arma::fill::zeros);
+					this->couplingTensor->SetTensor(zeros);
+				}
+				else
+				{
+					this->tdInitialTensor = couplingTensor->LabFrame();
+				}
+				this->SetTime(0.0);
+			}
+		}
 	}
 
-	std::ostream &operator<<(std::ostream& stream, const SCMatrix3x3& mat)
-    {
-        stream << "\n[[" << mat[0][0] << ", " << mat[0][1] << ", " << mat[0][2] << "]\n "
+	std::ostream &operator<<(std::ostream &stream, const SCMatrix3x3 &mat)
+	{
+		stream << "\n[[" << mat[0][0] << ", " << mat[0][1] << ", " << mat[0][2] << "]\n "
 			   << "[" << mat[1][0] << ", " << mat[1][1] << ", " << mat[1][2] << "]\n "
 			   << "[" << mat[2][0] << ", " << mat[2][1] << ", " << mat[2][2] << "]]\n";
 		return stream;
-    }
+	}
 
 	Interaction::Interaction(const Interaction &_interaction) : properties(_interaction.properties), couplingTensor(_interaction.couplingTensor), field(_interaction.field), dvalue(_interaction.dvalue), evalue(_interaction.evalue), EnergyShift(_interaction.EnergyShift),
 																group1(_interaction.group1), group2(_interaction.group2), type(_interaction.type), fieldType(_interaction.fieldType),
@@ -601,7 +709,6 @@ namespace SpinAPI
 																tdPrintTensor(_interaction.tdPrintTensor), tdPrintField(_interaction.tdPrintField), hffield(_interaction.hffield), orientations(_interaction.orientations),
 																OriWeights(_interaction.OriWeights), BondLengths(_interaction.BondLengths), Spacing(_interaction.Spacing), tau(_interaction.tau), dist(_interaction.dist),
 																tdSeed(_interaction.tdSeed), tdAutoseed(_interaction.tdAutoseed), tdGenerator(_interaction.tdGenerator), framelist(_interaction.framelist), f(_interaction.f)
-
 
 	{
 	}
@@ -690,12 +797,14 @@ namespace SpinAPI
 			return true;
 		else if (this->type == InteractionType::DoubleSpin && !this->group1.empty() && !this->group2.empty())
 			return true;
+			                else if (this->type == InteractionType::QuadraticSpin && !this->group1.empty())
+                        return true;
 		else if (this->type == InteractionType::Exchange && !this->group1.empty() && !this->group2.empty())
 			return true;
 		else if (this->type == InteractionType::Zfs && !this->group1.empty())
 			return true;
 		else if (this->type == InteractionType::SemiClassicalField && !this->group1.empty() && !this->hffield.empty())
-			return true;		
+			return true;
 
 		return false;
 	}
@@ -946,7 +1055,7 @@ namespace SpinAPI
 	{
 		bool createdSpinLists = false;
 
-		if (this->type == InteractionType::SingleSpin || this->type == InteractionType::Zfs || this->type == InteractionType::SemiClassicalField)
+		if (this->type == InteractionType::SingleSpin || this->type == InteractionType::Zfs || this->type == InteractionType::SemiClassicalField || this->type == InteractionType::QuadraticSpin)
 		{
 			// Attempt to get a list of spins from the input file
 			std::string str;
@@ -1549,24 +1658,24 @@ namespace SpinAPI
 	{
 		return std::isfinite(_d);
 	}
-    
-	void FreelyJointedPolymerBL(std::vector<double>& BondLengths, std::vector<SCHyperfineField>& Fields, double& tau, int ori)
-    {
+
+	void FreelyJointedPolymerBL(std::vector<double> &BondLengths, std::vector<SCHyperfineField> &Fields, double &tau, int ori)
+	{
 		std::vector<double> tau_sum;
-		for(auto f = Fields.begin(); f != Fields.end(); f++)
+		for (auto f = Fields.begin(); f != Fields.end(); f++)
 		{
- 			auto [a,n,sn] = (*f);
-			//int N = n * ori;
+			auto [a, n, sn] = (*f);
+			// int N = n * ori;
 			int N = n;
-			for(int i = 0; i < N; i++)
+			for (int i = 0; i < N; i++)
 			{
-				double bondlength = a[0][0] * std::sqrt(sn * (sn+1));
+				double bondlength = a[0][0] * std::sqrt(sn * (sn + 1));
 				BondLengths.push_back(bondlength);
-				tau_sum.push_back(std::pow(bondlength,2));
+				tau_sum.push_back(std::pow(bondlength, 2));
 			}
 		}
 		tau = std::reduce(tau_sum.begin(), tau_sum.end());
-		if(tau == 0)
+		if (tau == 0)
 		{
 			tau = 0;
 		}
@@ -1574,19 +1683,20 @@ namespace SpinAPI
 		{
 			tau = 6.0 / tau;
 		}
-    }
+	}
 
-	SCDistributionF FreelyJointedPolymerD(double prefactor ,double exp1)
-    {
-		auto f = [=](std::array<double,3> vector) mutable {
+	SCDistributionF FreelyJointedPolymerD(double prefactor, double exp1)
+	{
+		auto f = [=](std::array<double, 3> vector) mutable
+		{
 			double dot = 0;
 			dot += vector[0] * vector[0];
 			dot += vector[1] * vector[1];
 			dot += vector[2] * vector[2];
-			double weight = prefactor * std::exp(exp1*dot);
+			double weight = prefactor * std::exp(exp1 * dot);
 			return weight;
 		};
 		return f;
-    }
-    // -----------------------------------------------------
+	}
+	// -----------------------------------------------------
 }

@@ -33,6 +33,7 @@ namespace SpinAPI
 		Undefined,
 		SingleSpin,
 		DoubleSpin,
+		QuadraticSpin,
 		Exchange,
 		Zfs,
 		SemiClassicalField
