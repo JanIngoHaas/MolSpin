@@ -48,6 +48,7 @@ namespace RunSection
 		std::string electron1Name;
 		std::string electron2Name;
 		std::string fieldInteractionName;
+		bool enforceZeemanSync;
 		std::string initialStateName;
 		std::vector<std::string> hamiltonianH0list;
 		std::map<std::string, SpectrumCache> spectrumCache;

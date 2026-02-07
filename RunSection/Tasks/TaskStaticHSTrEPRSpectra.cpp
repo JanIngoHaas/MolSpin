@@ -136,6 +136,162 @@ namespace RunSection
 			return Rg * Rb * Ra;
 		}
 
+		bool IsZeemanInteraction(const SpinAPI::interaction_ptr &inter)
+		{
+			if (inter == nullptr)
+				return false;
+			if (!SpinAPI::IsStatic(*inter))
+				return false;
+			if (inter->Type() != SpinAPI::InteractionType::SingleSpin)
+				return false;
+			const arma::vec field = inter->Field();
+			return (field.n_elem == 3 && field.is_finite());
+		}
+
+		std::vector<SpinAPI::interaction_ptr> CollectZeemanInteractions(const SpinAPI::system_ptr &system, const std::vector<std::string> &h0list)
+		{
+			std::vector<SpinAPI::interaction_ptr> out;
+			if (system == nullptr)
+				return out;
+
+			out.reserve(h0list.size());
+			for (const auto &name : h0list)
+			{
+				auto inter = system->interactions_find(name);
+				if (!IsZeemanInteraction(inter))
+					continue;
+				out.push_back(inter);
+			}
+
+			std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
+				return a.get() < b.get();
+			});
+			out.erase(std::unique(out.begin(), out.end()), out.end());
+			return out;
+		}
+
+		SpinAPI::interaction_ptr FindZeemanForSpin(const SpinAPI::spin_ptr &spin, const std::vector<SpinAPI::interaction_ptr> &zeemanList)
+		{
+			if (spin == nullptr)
+				return nullptr;
+			for (const auto &inter : zeemanList)
+			{
+				if (inter == nullptr)
+					continue;
+				const auto group = inter->Group1();
+				if (std::find(group.begin(), group.end(), spin) != group.end())
+					return inter;
+			}
+			return nullptr;
+		}
+
+		bool IsParallel(const arma::vec &a, const arma::vec &b, double tol)
+		{
+			if (a.n_elem != 3 || b.n_elem != 3)
+				return false;
+			const double na = arma::norm(a);
+			const double nb = arma::norm(b);
+			if (!std::isfinite(na) || !std::isfinite(nb) || na == 0.0 || nb == 0.0)
+				return false;
+			return (arma::norm(arma::cross(a / na, b / nb)) <= tol);
+		}
+
+		bool CollectAddVectorSteps(const std::vector<std::shared_ptr<Action>> &actions,
+								   unsigned int steps,
+								   std::map<std::string, arma::vec> &stepsOut,
+								   std::string &error)
+		{
+			stepsOut.clear();
+			error.clear();
+
+			const double tol = 1e-12;
+			for (const auto &action : actions)
+			{
+				auto add = std::dynamic_pointer_cast<ActionAddVector>(action);
+				if (!add)
+				{
+					error = "Non-AddVector action present.";
+					return false;
+				}
+
+				std::string targetName;
+				if (!add->GetProperties()->Get("vector", targetName))
+					add->GetProperties()->Get("actionvector", targetName);
+				if (targetName.empty())
+				{
+					error = "AddVector action missing target vector.";
+					return false;
+				}
+
+				arma::vec direction;
+				if (!add->GetProperties()->Get("direction", direction) || direction.n_elem != 3 || !direction.is_finite())
+				{
+					error = "AddVector action has invalid direction.";
+					return false;
+				}
+				direction = arma::normalise(direction);
+
+				if (add->Period() != 1 || add->First() != 1)
+				{
+					error = "AddVector action has non-unit period or nonzero start.";
+					return false;
+				}
+				if (add->Last() != 0 && add->Last() < steps)
+				{
+					error = "AddVector action terminates before the end of the run.";
+					return false;
+				}
+
+				const arma::vec step = add->Value() * direction;
+				auto it = stepsOut.find(targetName);
+				if (it != stepsOut.end())
+				{
+					if (arma::norm(it->second - step) > tol)
+					{
+						error = "Conflicting AddVector actions for the same target.";
+						return false;
+					}
+				}
+				else
+				{
+					stepsOut.emplace(targetName, step);
+				}
+			}
+
+			return true;
+		}
+
+		struct FieldSyncGuard
+		{
+			std::vector<std::pair<SpinAPI::interaction_ptr, arma::vec>> saved;
+
+			void Apply(const std::vector<SpinAPI::interaction_ptr> &interactions, const arma::vec &field)
+			{
+				saved.clear();
+				saved.reserve(interactions.size());
+				for (const auto &inter : interactions)
+				{
+					if (inter == nullptr)
+						continue;
+					const arma::vec current = inter->Field();
+					if (current.n_elem != 3 || !current.is_finite())
+						continue;
+					saved.emplace_back(inter, current);
+					arma::vec tmp = field;
+					inter->SetField(tmp);
+				}
+			}
+
+			~FieldSyncGuard()
+			{
+				for (auto &entry : saved)
+				{
+					arma::vec tmp = entry.second;
+					entry.first->SetField(tmp);
+				}
+			}
+		};
+
 		struct SymmetryFlags
 		{
 			bool allIsotropic = true;
@@ -210,12 +366,13 @@ namespace RunSection
 				if (inter->Type() == SpinAPI::InteractionType::SingleSpin)
 				{
 					arma::mat R = PassiveZXZRotation(inter->Framelist());
+					arma::mat Rt = R.t();
 					for (const auto &spin : inter->Group1())
 					{
 						arma::mat G = arma::conv_to<arma::mat>::from(spin->GetTensor().LabFrame());
 						if (inter->IgnoreTensors())
 							G = arma::eye<arma::mat>(3, 3);
-						G = R * G * R.t();
+						G = Rt * G * Rt.t();
 						UpdateSymmetryFlags(G, flags, fullTensorRotation, relTol);
 					}
 				}
@@ -223,7 +380,8 @@ namespace RunSection
 				{
 					arma::mat A = arma::conv_to<arma::mat>::from(inter->CouplingTensor()->LabFrame());
 					arma::mat R = PassiveZXZRotation(inter->Framelist());
-					A = R * A * R.t();
+					arma::mat Rt = R.t();
+					A = Rt * A * Rt.t();
 					UpdateSymmetryFlags(A, flags, fullTensorRotation, relTol);
 				}
 				else if (inter->Type() == SpinAPI::InteractionType::Zfs)
@@ -250,12 +408,13 @@ namespace RunSection
 			if (fieldInteraction != nullptr)
 			{
 				arma::mat R = PassiveZXZRotation(fieldInteraction->Framelist());
+				arma::mat Rt = R.t();
 				for (const auto &spin : fieldInteraction->Group1())
 				{
 					arma::mat G = arma::conv_to<arma::mat>::from(spin->GetTensor().LabFrame());
 					if (fieldInteraction->IgnoreTensors())
 						G = arma::eye<arma::mat>(3, 3);
-					G = R * G * R.t();
+					G = Rt * G * Rt.t();
 					UpdateSymmetryFlags(G, flags, fullTensorRotation, relTol);
 				}
 			}
@@ -395,6 +554,7 @@ namespace RunSection
 		  electron1Name(""),
 		  electron2Name(""),
 		  fieldInteractionName(""),
+		  enforceZeemanSync(false),
 		  initialStateName(""),
 		  hamiltonianH0list()
 	{
@@ -487,11 +647,56 @@ namespace RunSection
 			}
 			this->Log() << "Using " << detectSpins.size() << " detection spins in SpinSystem \"" << (*sysIt)->Name() << "\"." << std::endl;
 
+			std::vector<SpinAPI::interaction_ptr> zeemanInteractions = CollectZeemanInteractions((*sysIt), h0list);
+			if (zeemanInteractions.empty() && fieldInteraction != nullptr)
+				zeemanInteractions.push_back(fieldInteraction);
+
+			FieldSyncGuard zeemanSync;
+			if (this->enforceZeemanSync && fieldInteraction != nullptr && !zeemanInteractions.empty())
+			{
+				const arma::vec fieldRef = fieldInteraction->Field();
+				if (fieldRef.n_elem == 3 && fieldRef.is_finite())
+				{
+					const double tol = 1e-10;
+					for (const auto &inter : zeemanInteractions)
+					{
+						if (inter == nullptr)
+							continue;
+						const arma::vec f = inter->Field();
+						if (f.n_elem != 3 || !f.is_finite())
+							continue;
+						if (arma::norm(f - fieldRef) > tol)
+						{
+							this->Log() << "Enforcing Zeeman field synchronization to match \"" << fieldInteraction->Name() << "\"." << std::endl;
+							break;
+						}
+					}
+					zeemanSync.Apply(zeemanInteractions, fieldRef);
+				}
+			}
+
 			arma::vec Bvec = fieldInteraction->Field();
 			if (Bvec.n_elem != 3)
 			{
 				this->Log() << "Zeeman interaction \"" << fieldInteraction->Name() << "\" does not provide a 3-vector field." << std::endl;
 				continue;
+			}
+			if (!this->enforceZeemanSync && zeemanInteractions.size() > 1)
+			{
+				const double tol = 1e-10;
+				for (const auto &inter : zeemanInteractions)
+				{
+					if (inter == nullptr || inter == fieldInteraction)
+						continue;
+					const arma::vec f = inter->Field();
+					if (f.n_elem != 3 || !f.is_finite())
+						continue;
+					if (arma::norm(f - Bvec) > tol)
+					{
+						this->Log() << "Warning: Zeeman interactions have mismatched fields. Consider enforce_zeeman_sync=true for EasySpin-compatible behavior." << std::endl;
+						break;
+					}
+				}
 			}
 			const double Bmag = arma::norm(Bvec);
 			if (!std::isfinite(Bmag) || Bmag <= 0.0)
@@ -506,7 +711,46 @@ namespace RunSection
 			{
 				arma::vec field0;
 				arma::vec fieldStep;
-				if (this->GetLinearFieldSweep((*sysIt), fieldInteraction, field0, fieldStep))
+				bool cacheOk = this->GetLinearFieldSweep((*sysIt), fieldInteraction, field0, fieldStep);
+				if (cacheOk && !this->enforceZeemanSync && zeemanInteractions.size() > 1)
+				{
+					std::map<std::string, arma::vec> stepsByTarget;
+					std::string error;
+					if (!CollectAddVectorSteps(this->Actions(), this->RunSettings()->Steps(), stepsByTarget, error))
+					{
+						cacheOk = false;
+						this->Log() << "Sweep cache disabled: " << error << std::endl;
+					}
+					else
+					{
+						const arma::vec refField = fieldInteraction->Field();
+						const double tol = 1e-8;
+						for (const auto &inter : zeemanInteractions)
+						{
+							if (inter == nullptr || inter == fieldInteraction)
+								continue;
+							const arma::vec f = inter->Field();
+							if (f.n_elem != 3 || !f.is_finite() ||
+								!IsParallel(f, refField, 1e-6) ||
+								std::abs(arma::norm(f) - arma::norm(refField)) > tol)
+							{
+								cacheOk = false;
+								this->Log() << "Sweep cache disabled: Zeeman fields are not synchronized." << std::endl;
+								break;
+							}
+							const std::string target = (*sysIt)->Name() + "." + inter->Name() + ".field";
+							auto it = stepsByTarget.find(target);
+							if (it == stepsByTarget.end() || arma::norm(it->second - fieldStep) > tol)
+							{
+								cacheOk = false;
+								this->Log() << "Sweep cache disabled: Zeeman sweep steps are not synchronized." << std::endl;
+								break;
+							}
+						}
+					}
+				}
+
+				if (cacheOk)
 				{
 					SpectrumCache cache;
 					if (this->BuildCachedSpectrum((*sysIt), fieldInteraction, field0, fieldStep, cache))
@@ -691,40 +935,38 @@ namespace RunSection
 			// Field-domain linewidth (FWHM, mT). Apply the lineshape in field units.
 			const double lwB_mT = std::abs(this->linewidth_mT);
 
-			// Precompute interaction-frame rotation for the Zeeman interaction (g-tensor frame).
-			// IMPORTANT: Interaction framelists are interpreted as passive ZXZ Euler angles.
-			// SpinSpace::InteractionOperatorRotated() uses the same convention internally.
-			arma::mat RFrame = arma::eye<arma::mat>(3, 3);
+			// Determine Zeeman interaction for each detection spin (frame + prefactor).
+			std::vector<SpinAPI::interaction_ptr> spinZeeman(detectSpins.size(), nullptr);
+			for (size_t i = 0; i < detectSpins.size(); ++i)
 			{
-				auto fr = fieldInteraction->Framelist();
-				double a = (fr.n_elem >= 1) ? fr(0) : 0.0;
-				double b = (fr.n_elem >= 2) ? fr(1) : 0.0;
-				double g = (fr.n_elem >= 3) ? fr(2) : 0.0;
-
-				// Passive ZXZ Euler rotation: R = Rz(gamma) * Ry(beta) * Rz(alpha)
-				const double ca = std::cos(a), sa = std::sin(a);
-				const double cb = std::cos(b), sb = std::sin(b);
-				const double cg = std::cos(g), sg = std::sin(g);
-
-				arma::mat Ra = {{ca, sa, 0.0}, {-sa, ca, 0.0}, {0.0, 0.0, 1.0}};
-				arma::mat Rb = {{cb, 0.0, -sb}, {0.0, 1.0, 0.0}, {sb, 0.0, cb}};
-				arma::mat Rg = {{cg, sg, 0.0}, {-sg, cg, 0.0}, {0.0, 0.0, 1.0}};
-				RFrame = Rg * Rb * Ra;
+				spinZeeman[i] = FindZeemanForSpin(detectSpins[i], zeemanInteractions);
+				if (spinZeeman[i] == nullptr)
+					spinZeeman[i] = fieldInteraction;
 			}
 
-			// Base tensors (as specified on spins)
+			// Base tensors (as specified on spins), rotated from tensor frame to molecular frame.
 			std::vector<arma::mat> g_frame_base(detectSpins.size());
+			std::vector<double> mu_prefactors(detectSpins.size(), 1.0);
 			for (size_t i = 0; i < detectSpins.size(); ++i)
 			{
 				arma::mat g_base = arma::conv_to<arma::mat>::from(detectSpins[i]->GetTensor().LabFrame());
-				if (fieldInteraction->IgnoreTensors())
+				if (spinZeeman[i] != nullptr && spinZeeman[i]->IgnoreTensors())
 					g_base = arma::eye<arma::mat>(3, 3);
-				g_frame_base[i] = RFrame * g_base * RFrame.t();
-			}
 
-			double mu_prefactor = fieldInteraction->Prefactor();
-			if (fieldInteraction->AddCommonPrefactor())
-				mu_prefactor *= 8.79410005e+1;
+				arma::mat RFrame = arma::eye<arma::mat>(3, 3);
+				if (spinZeeman[i] != nullptr)
+					RFrame = PassiveZXZRotation(spinZeeman[i]->Framelist());
+				const arma::mat RFrame_T2M = RFrame.t();
+				g_frame_base[i] = RFrame_T2M * g_base * RFrame_T2M.t();
+
+				if (spinZeeman[i] != nullptr)
+				{
+					double mu = spinZeeman[i]->Prefactor();
+					if (spinZeeman[i]->AddCommonPrefactor())
+						mu *= 8.79410005e+1;
+					mu_prefactors[i] = mu;
+				}
+			}
 
 			// Accumulators
 			double total_x = 0.0;
@@ -740,12 +982,14 @@ namespace RunSection
 
 			// For dH/dB we need the Zeeman Hamiltonian only (rotated per orientation)
 			std::vector<std::string> zeelist;
-			zeelist.push_back(fieldInteraction->Name());
+			zeelist.reserve(zeemanInteractions.size());
+			for (const auto &inter : zeemanInteractions)
+				zeelist.push_back(inter->Name());
 
 			const arma::cx_double I(0.0, 1.0);
 			const size_t spin_count = detectSpins.size();
 
-			auto accumulate_grid = [&](int grid_num,
+			auto accumulate_grid = [&](int grid_num, SpinAPI::SpinSpace &space_local,
 									   double &acc_total_x, double &acc_total_y, double &acc_total_perp,
 									   double &acc_cross_x, double &acc_cross_y,
 									   std::vector<double> &acc_spin_x, std::vector<double> &acc_spin_y,
@@ -767,14 +1011,13 @@ namespace RunSection
 					if (!this->CreateRotationMatrix(phi, theta, gamma, Rot))
 						continue;
 
-					// Rot is an ACTIVE rotation. SpinSpace::InteractionOperatorRotated() will transpose it internally
-					// to obtain the PASSIVE tensor rotation used for anisotropic couplings. To keep magnetic dipole operators
-					// consistent with the Hamiltonian orientation, we use the same PASSIVE matrix here.
-					const arma::mat Rpowder = Rot.t();
+					// Rot is a PASSIVE ZXZ rotation (EasySpin convention) from molecular to lab frame.
+					// Use it directly for tensor rotation and magnetic dipole operators.
+					const arma::mat Rpowder = Rot;
 
 					// Build rotated base Hamiltonian
 					arma::sp_cx_mat H0_sp;
-					if (!space.BaseHamiltonianRotatedZXZ(h0list, Rot, H0_sp))
+					if (!space_local.BaseHamiltonianRotatedZXZ(h0list, Rot, H0_sp))
 						continue;
 
 					arma::vec eigval;
@@ -798,7 +1041,7 @@ namespace RunSection
 
 					// Zeeman-only rotated Hamiltonian -> dH/dB magnitude for field-to-energy Jacobian.
 					arma::sp_cx_mat Hz_sp;
-					if (!space.BaseHamiltonianRotatedZXZ(zeelist, Rot, Hz_sp))
+					if (!space_local.BaseHamiltonianRotatedZXZ(zeelist, Rot, Hz_sp))
 						continue;
 					arma::sp_cx_mat dHdB_sp = Hz_sp / Bmag; // rad/ns/T
 					// For Hermitian dHdB, Re(<n|dHdB|n> - <m|dHdB|m>) gives d(En-Em)/dB.
@@ -825,6 +1068,7 @@ namespace RunSection
 						arma::cx_mat mux = g(0, 0) * Sx_list[i] + g(1, 0) * Sy_list[i] + g(2, 0) * Sz_list[i];
 						arma::cx_mat muy = g(0, 1) * Sx_list[i] + g(1, 1) * Sy_list[i] + g(2, 1) * Sz_list[i];
 
+						const double mu_prefactor = mu_prefactors[i];
 						if (mu_prefactor != 1.0)
 						{
 							mux *= mu_prefactor;
@@ -953,6 +1197,10 @@ namespace RunSection
 #ifdef _OPENMP
 #pragma omp parallel
 			{
+				SpinAPI::SpinSpace space_local(*(*sysIt));
+				space_local.UseSuperoperatorSpace(false);
+				space_local.UseFullTensorRotation(this->fullTensorRotation);
+
 				double local_total_x = 0.0;
 				double local_total_y = 0.0;
 				double local_total_perp = 0.0;
@@ -967,7 +1215,7 @@ namespace RunSection
 #pragma omp for
 				for (int grid_num = 0; grid_num < numPoints; ++grid_num)
 				{
-					accumulate_grid(grid_num, local_total_x, local_total_y, local_total_perp, local_cross_x, local_cross_y,
+					accumulate_grid(grid_num, space_local, local_total_x, local_total_y, local_total_perp, local_cross_x, local_cross_y,
 									local_spin_x, local_spin_y, local_spin_perp, local_spin_p, local_spin_m);
 				}
 
@@ -991,7 +1239,7 @@ namespace RunSection
 #else
 			for (int grid_num = 0; grid_num < numPoints; ++grid_num)
 			{
-				accumulate_grid(grid_num, total_x, total_y, total_perp, cross_x, cross_y,
+				accumulate_grid(grid_num, space, total_x, total_y, total_perp, cross_x, cross_y,
 								spin_x, spin_y, spin_perp, spin_p, spin_m);
 			}
 #endif
@@ -1043,33 +1291,16 @@ namespace RunSection
 
 	bool TaskStaticHSTrEPRSpectra::CreateRotationMatrix(double &_alpha, double &_beta, double &_gamma, arma::mat &_R) const
 	{
-		// IMPORTANT: This must return an *ACTIVE* rotation matrix.
-		// SpinSpace::InteractionOperatorRotated() interprets the supplied powder matrix as ACTIVE and
-		// internally transposes it to obtain the PASSIVE tensor-rotation used for coupling tensors.
-		//
-		// To align with the passive ZXZ Euler convention, construct the ACTIVE
-		// inverse rotation such that R.t() = Rz(gamma) * Ry(beta) * Rz(alpha).
+		// EasySpin convention: passive ZXZ Euler rotation (molecular -> lab).
 		const double ca = std::cos(_alpha), sa = std::sin(_alpha);
 		const double cb = std::cos(_beta), sb = std::sin(_beta);
 		const double cg = std::cos(_gamma), sg = std::sin(_gamma);
 
-		// Active inverse rotation (negative angles)
-		arma::mat R1 = {
-			{ca, -sa, 0.0},
-			{sa, ca, 0.0},
-			{0.0, 0.0, 1.0}};
+		arma::mat Ra = {{ca, sa, 0.0}, {-sa, ca, 0.0}, {0.0, 0.0, 1.0}};
+		arma::mat Rb = {{cb, 0.0, -sb}, {0.0, 1.0, 0.0}, {sb, 0.0, cb}};
+		arma::mat Rg = {{cg, sg, 0.0}, {-sg, cg, 0.0}, {0.0, 0.0, 1.0}};
 
-		arma::mat R2 = {
-			{cb, 0.0, sb},
-			{0.0, 1.0, 0.0},
-			{-sb, 0.0, cb}};
-
-		arma::mat R3 = {
-			{cg, -sg, 0.0},
-			{sg, cg, 0.0},
-			{0.0, 0.0, 1.0}};
-
-		_R = R1 * R2 * R3;
+		_R = Rg * Rb * Ra;
 		return true;
 	}
 
@@ -1480,50 +1711,22 @@ namespace RunSection
 			return false;
 
 		const std::string target = _system->Name() + "." + _fieldInteraction->Name() + ".field";
-		bool found = false;
-		arma::vec direction;
-		double value = 0.0;
 
-		for (const auto &action : this->Actions())
-		{
-			auto add = std::dynamic_pointer_cast<ActionAddVector>(action);
-			if (!add)
-				return false;
-
-			std::string targetName;
-			if (!add->GetProperties()->Get("vector", targetName))
-				add->GetProperties()->Get("actionvector", targetName);
-
-			if (targetName != target)
-				return false;
-
-			if (found)
-				return false;
-
-			if (!add->GetProperties()->Get("direction", direction))
-				return false;
-			if (direction.n_elem != 3 || !direction.is_finite())
-				return false;
-
-			direction = arma::normalise(direction);
-			value = add->Value();
-
-			if (add->Period() != 1 || add->First() != 1)
-				return false;
-			if (add->Last() != 0 && add->Last() < this->RunSettings()->Steps())
-				return false;
-
-			found = true;
-		}
-
-		if (!found)
+		std::map<std::string, arma::vec> stepsByTarget;
+		std::string error;
+		if (!CollectAddVectorSteps(this->Actions(), this->RunSettings()->Steps(), stepsByTarget, error))
 			return false;
 
-		_fieldStep = value * direction;
-		if (arma::norm(_field0) > 0.0)
+		auto it = stepsByTarget.find(target);
+		if (it == stepsByTarget.end())
+			return false;
+
+		_fieldStep = it->second;
+		if (arma::norm(_field0) > 0.0 && arma::norm(_fieldStep) > 0.0)
 		{
 			arma::vec dir0 = arma::normalise(_field0);
-			if (arma::norm(arma::cross(dir0, direction)) > 1e-6)
+			arma::vec dirStep = arma::normalise(_fieldStep);
+			if (arma::norm(arma::cross(dir0, dirStep)) > 1e-6)
 				return false;
 		}
 
@@ -1591,11 +1794,24 @@ namespace RunSection
 		if (h0list.empty())
 			return false;
 
+		std::vector<SpinAPI::interaction_ptr> zeemanInteractions = CollectZeemanInteractions(_system, h0list);
+		if (zeemanInteractions.empty() && _fieldInteraction != nullptr)
+			zeemanInteractions.push_back(_fieldInteraction);
+
+		auto isZeemanName = [&](const std::string &name) -> bool {
+			for (const auto &inter : zeemanInteractions)
+			{
+				if (inter != nullptr && inter->Name() == name)
+					return true;
+			}
+			return false;
+		};
+
 		std::vector<std::string> h0list_noB;
 		h0list_noB.reserve(h0list.size());
 		for (const auto &name : h0list)
 		{
-			if (name != _fieldInteraction->Name())
+			if (!isZeemanName(name))
 				h0list_noB.push_back(name);
 		}
 
@@ -1733,38 +1949,43 @@ namespace RunSection
 			lineWindow = (lwB_T > 0.0 && dBabs > 0.0) ? 6.0 * lwB_T : 0.0;
 		}
 
-		arma::mat RFrame = arma::eye<arma::mat>(3, 3);
+		// Determine Zeeman interaction for each detection spin (frame + prefactor).
+		std::vector<SpinAPI::interaction_ptr> spinZeeman(detectSpins.size(), nullptr);
+		for (size_t i = 0; i < detectSpins.size(); ++i)
 		{
-			auto fr = _fieldInteraction->Framelist();
-			double a = (fr.n_elem >= 1) ? fr(0) : 0.0;
-			double b = (fr.n_elem >= 2) ? fr(1) : 0.0;
-			double g = (fr.n_elem >= 3) ? fr(2) : 0.0;
-
-			const double ca = std::cos(a), sa = std::sin(a);
-			const double cb = std::cos(b), sb = std::sin(b);
-			const double cg = std::cos(g), sg = std::sin(g);
-
-			arma::mat Ra = {{ca, sa, 0.0}, {-sa, ca, 0.0}, {0.0, 0.0, 1.0}};
-			arma::mat Rb = {{cb, 0.0, -sb}, {0.0, 1.0, 0.0}, {sb, 0.0, cb}};
-			arma::mat Rg = {{cg, sg, 0.0}, {-sg, cg, 0.0}, {0.0, 0.0, 1.0}};
-			RFrame = Rg * Rb * Ra;
+			spinZeeman[i] = FindZeemanForSpin(detectSpins[i], zeemanInteractions);
+			if (spinZeeman[i] == nullptr)
+				spinZeeman[i] = _fieldInteraction;
 		}
 
+		// Base tensors (as specified on spins), rotated from tensor frame to molecular frame.
 		std::vector<arma::mat> g_frame_base(detectSpins.size());
+		std::vector<double> mu_prefactors(detectSpins.size(), 1.0);
 		for (size_t i = 0; i < detectSpins.size(); ++i)
 		{
 			arma::mat g_base = arma::conv_to<arma::mat>::from(detectSpins[i]->GetTensor().LabFrame());
-			if (_fieldInteraction->IgnoreTensors())
+			if (spinZeeman[i] != nullptr && spinZeeman[i]->IgnoreTensors())
 				g_base = arma::eye<arma::mat>(3, 3);
-			g_frame_base[i] = RFrame * g_base * RFrame.t();
+
+			arma::mat RFrame = arma::eye<arma::mat>(3, 3);
+			if (spinZeeman[i] != nullptr)
+				RFrame = PassiveZXZRotation(spinZeeman[i]->Framelist());
+			const arma::mat RFrame_T2M = RFrame.t();
+			g_frame_base[i] = RFrame_T2M * g_base * RFrame_T2M.t();
+
+			if (spinZeeman[i] != nullptr)
+			{
+				double mu = spinZeeman[i]->Prefactor();
+				if (spinZeeman[i]->AddCommonPrefactor())
+					mu *= 8.79410005e+1;
+				mu_prefactors[i] = mu;
+			}
 		}
 
-		double mu_prefactor = _fieldInteraction->Prefactor();
-		if (_fieldInteraction->AddCommonPrefactor())
-			mu_prefactor *= 8.79410005e+1;
-
 		std::vector<std::string> zeelist;
-		zeelist.push_back(_fieldInteraction->Name());
+		zeelist.reserve(zeemanInteractions.size());
+		for (const auto &inter : zeemanInteractions)
+			zeelist.push_back(inter->Name());
 
 		const arma::uword dim = space.HilbertSpaceDimensions();
 		std::vector<std::pair<arma::uword, arma::uword>> transitions;
@@ -1820,7 +2041,7 @@ namespace RunSection
 				if (!this->CreateRotationMatrix(phi, theta, gamma, Rot))
 					continue;
 
-				const arma::mat Rpowder = Rot.t();
+				const arma::mat Rpowder = Rot;
 
 				arma::sp_cx_mat Hstatic_sp;
 				if (h0list_noB.empty())
@@ -1853,6 +2074,7 @@ namespace RunSection
 					arma::cx_mat mux = g(0, 0) * Sx_list[i] + g(1, 0) * Sy_list[i] + g(2, 0) * Sz_list[i];
 					arma::cx_mat muy = g(0, 1) * Sx_list[i] + g(1, 1) * Sy_list[i] + g(2, 1) * Sz_list[i];
 
+					const double mu_prefactor = mu_prefactors[i];
 					if (mu_prefactor != 1.0)
 					{
 						mux *= mu_prefactor;
@@ -2364,6 +2586,8 @@ namespace RunSection
 		this->Properties()->Get("electron2", this->electron2Name);
 
 		this->Properties()->Get("fieldinteraction", this->fieldInteractionName);
+		this->Properties()->Get("enforce_zeeman_sync", this->enforceZeemanSync);
+		this->Properties()->Get("enforcezeemansync", this->enforceZeemanSync);
 		this->Properties()->Get("initialstate", this->initialStateName);
 
 		if (this->Properties()->GetList("hamiltonianh0list", this->hamiltonianH0list, ','))

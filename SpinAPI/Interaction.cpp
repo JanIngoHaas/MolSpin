@@ -817,6 +817,15 @@ namespace SpinAPI
 		return this->field;
 	}
 
+	// Sets the field vector
+	bool Interaction::SetField(const arma::vec &_field)
+	{
+		if (!CheckActionVectorInteractionField(_field))
+			return false;
+		this->field = _field;
+		return true;
+	}
+
 	// Returns the D value for Zfs
 	const double Interaction::Dvalue() const
 	{

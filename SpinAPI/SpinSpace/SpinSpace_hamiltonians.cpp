@@ -665,14 +665,14 @@ namespace SpinAPI
 		auto ATensor = _interaction->CouplingTensor();
 
 		// IMPORTANT:
-		// The powder-rotation matrix produced in TaskStaticHSDirectSpectra / TaskStaticHSTrEPRSpectra
-		// is an *active* rotation (see CreateRotationMatrix: cos,-sin; sin,cos). For tensor rotation
-		// we need the corresponding *passive* matrix.
-		// Therefore we transpose here.
-		const arma::mat Rpowder = _rotationmatrix.t();
+		// The supplied powder-rotation matrix follows the EasySpin convention and is a *passive*
+		// transformation (molecular frame -> lab frame). Use it directly for tensor rotation.
+		const arma::mat Rpowder = _rotationmatrix;
 
 		// Interaction-frame rotation from the interaction framelist.
-		// We interpret framelist Euler angles with a passive ZXZ Euler convention.
+		// We interpret framelist Euler angles with a passive ZXZ convention, matching EasySpin
+		// (molecular frame -> tensor frame). Therefore we invert (transpose) to rotate tensors
+		// from tensor frame into molecular frame.
 		arma::mat RFrame = arma::eye<arma::mat>(3, 3);
 		{
 			auto fr = _interaction->Framelist();
@@ -693,7 +693,8 @@ namespace SpinAPI
 
 		auto RotateTensorFrameAndPowder = [&](const arma::mat &A) -> arma::mat
 		{
-			arma::mat Af = RFrame * A * RFrame.t();
+			const arma::mat RFrame_T2M = RFrame.t();
+			arma::mat Af = RFrame_T2M * A * RFrame_T2M.t();
 			arma::mat Al = Rpowder * Af * Rpowder.t();
 			if (!this->useFullTensorRotation)
 			{
