@@ -92,27 +92,6 @@ namespace SpinAPI
 					this->framelist = _framelist;
 				}
 			}
-			else if (str.compare("dipole_sa") == 0 )
-			{
-				this->type = InteractionType::Dipolar_SA;
-
-				std::vector<double> _framelist;
-				if (this->Properties()->GetList ("orientation", _framelist))
-				{
-					this->framelist = _framelist;
-				}
-
-			}
-			else if (str.compare("hyperfine_sa") == 0 )
-			{
-				this->type = InteractionType::Hyperfine_SA;
-
-				std::vector<double> _framelist;
-				if (this->Properties()->GetList ("orientation", _framelist))
-				{
-					this->framelist = _framelist;
-				}
-			}
 			else if (str.compare("quadraticspin") == 0)
 			{
 				this->type = InteractionType::QuadraticSpin;
@@ -818,12 +797,8 @@ namespace SpinAPI
 			return true;
 		else if (this->type == InteractionType::DoubleSpin && !this->group1.empty() && !this->group2.empty())
 			return true;
-		else if (this->type == InteractionType::Dipolar_SA && !this->group1.empty() && !this->group2.empty())
-			return true;
-		else if (this->type == InteractionType::Hyperfine_SA && !this->group1.empty() && !this->group2.empty())
-			return true;
-			                else if (this->type == InteractionType::QuadraticSpin && !this->group1.empty())
-                        return true;
+		else if (this->type == InteractionType::QuadraticSpin && !this->group1.empty())
+            		return true;
 		else if (this->type == InteractionType::Exchange && !this->group1.empty() && !this->group2.empty())
 			return true;
 		else if (this->type == InteractionType::Zfs && !this->group1.empty())
@@ -1098,7 +1073,7 @@ namespace SpinAPI
 
 			createdSpinLists = this->AddSpinList(str, _spinlist, this->group1);
 		}
-		else if (this->type == InteractionType::DoubleSpin || this->type == InteractionType::Exchange || this->type == InteractionType::Dipolar_SA || this->type == InteractionType::Hyperfine_SA)
+		else if (this->type == InteractionType::DoubleSpin || this->type == InteractionType::Exchange )
 		{
 			// Attempt to get a list of spins from the input file
 			std::string str1;
@@ -1176,20 +1151,6 @@ namespace SpinAPI
 			result.insert(result.begin(), this->group1.cbegin(), this->group1.cend()); // Insert at the beginning of the vector
 			result.insert(result.end(), this->group2.cbegin(), this->group2.cend());   // Insert after the previously inserted spins
 		}
-		else if (this->type == InteractionType::Dipolar_SA &&
-			(std::find(this->group1.cbegin(), this->group1.cend(), _spin) != this->group1.cend() || std::find(this->group2.cbegin(), this->group2.cend(), _spin) != this->group2.cend()))
-		{
-			result.reserve(this->group1.size() + this->group2.size());				   // Reserve space for both groups to avoid more than 1 reallocation
-			result.insert(result.begin(), this->group1.cbegin(), this->group1.cend()); // Insert at the beginning of the vector
-			result.insert(result.end(), this->group2.cbegin(), this->group2.cend());   // Insert after the previously inserted spins
-		}
-		else if (this->type == InteractionType::Hyperfine_SA &&
-			(std::find(this->group1.cbegin(), this->group1.cend(), _spin) != this->group1.cend() || std::find(this->group2.cbegin(), this->group2.cend(), _spin) != this->group2.cend()))
-		{
-			result.reserve(this->group1.size() + this->group2.size());				   // Reserve space for both groups to avoid more than 1 reallocation
-			result.insert(result.begin(), this->group1.cbegin(), this->group1.cend()); // Insert at the beginning of the vector
-			result.insert(result.end(), this->group2.cbegin(), this->group2.cend());   // Insert after the previously inserted spins
-		}
 		else if (this->type == InteractionType::Exchange &&
 				 (std::find(this->group1.cbegin(), this->group1.cend(), _spin) != this->group1.cend() || std::find(this->group2.cbegin(), this->group2.cend(), _spin) != this->group2.cend()))
 		{
@@ -1227,7 +1188,7 @@ namespace SpinAPI
 		bool was_extended = false;
 
 		// Only the DoubleSpin interaction type couples spins
-		if (this->type == InteractionType::DoubleSpin || this->type == InteractionType::Exchange || this->type == InteractionType::Dipolar_SA || this->type == InteractionType::Hyperfine_SA)
+		if (this->type == InteractionType::DoubleSpin || this->type == InteractionType::Exchange )
 		{
 			bool containsInteractingSpins = false;
 

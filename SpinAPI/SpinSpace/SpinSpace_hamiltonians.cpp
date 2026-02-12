@@ -991,7 +991,7 @@ namespace SpinAPI
 				tmp += Sz * field(2) * sqrt(g(2, 2) * g(2, 2) + g(2, 1) * g(2, 1) + g(2, 0) * g(2, 0));
 			}
 		}
-		else if (_interaction->Type() == InteractionType::Hyperfine_SA)
+		else if (_interaction->Type() == InteractionType::DoubleSpin)
 		{
 			// Obtain lists of interacting spins, coupling tensor, and define matrices to hold the magnetic moment operators
 			auto spins1 = _interaction->Group1();
@@ -1003,19 +1003,59 @@ namespace SpinAPI
 			arma::cx_mat S2y;
 			arma::cx_mat S2z;
 
+			std::string interaction_type;
+
 			// Fill the matrix with the sum of all the interactions
 			for (auto i = spins1.cbegin(); i != spins1.cend(); i++)
 			{
 				for (auto j = spins2.cbegin(); j != spins2.cend(); j++)
 				{
-					// Obtain the magnetic moment operators within the Hilbert space
+					if ((*i)->Type() == SpinAPI::SpinType::Electron)
+					{
+						// Obtain the magnetic moment operators within the Hilbert space. S1 always electron
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*i), S1x);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*i), S1y);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*i), S1z);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sx()), (*j), S2x);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sy()), (*j), S2y);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sz()), (*j), S2z);
 
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*i), S1x);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*i), S1y);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*i), S1z);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sx()), (*j), S2x);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sy()), (*j), S2y);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sz()), (*j), S2z);
+						if ((*j)->Type() == SpinAPI::SpinType::Electron)
+						{
+							interaction_type = "Dipolar";
+						}
+						else if ((*j)->Type() == SpinAPI::SpinType::Nucleus)
+						{
+							interaction_type = "Hyperfine";
+						}
+						else
+						{
+							std::cerr << "Could not construct hamiltonian in the secular approximation. Unrecognized type of spins. Please specify in the Spin object 'type = electron' or 'type = nucleus'." << std::endl;
+						}
+					}
+					else if ((*j)->Type() == SpinAPI::SpinType::Electron)
+					{
+						// Obtain the magnetic moment operators within the Hilbert space. S1 always electron
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*j), S1x);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*j), S1y);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*j), S1z);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sx()), (*i), S2x);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sy()), (*i), S2y);
+						this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sz()), (*i), S2z);
+
+						if ((*i)->Type() == SpinAPI::SpinType::Nucleus)
+						{
+							interaction_type = "Hyperfine";
+						}
+						else
+						{
+							std::cerr << "Could not construct hamiltonian in the secular approximation. Unrecognized type of spins. Please specify in the Spin object 'type = electron' or 'type = nucleus'." << std::endl;
+						}
+					}
+					else
+					{
+						std::cerr << "Could not construct hamiltonian in the secular approximation. Unrecognized type of spins. Please specify in the Spin object 'type = electron' or 'type = nucleus'. Additionally, currently there is no supported nucleus-nucleus interaction in the secular approximation." << std::endl;
+					}
 
 					if (ATensor != nullptr && !IsIsotropic(*ATensor))
 					{
@@ -1026,56 +1066,18 @@ namespace SpinAPI
 						// Rotate A-tensor to the lab frame
 						A = _rotationmatrix * A * _rotationmatrix.t();
 
-						// Secular approximation
-						tmp += S1z * (A(2, 0) * S2x + A(2, 1) * S2y + A(2, 2) * S2z);
-
-					}
-					else
-					{
-						// If there is no interaction tensor or if the tensor is isotropic, just take the dot product
-						tmp += S1x * S2x + S1y * S2y + S1z * S2z;
-					}
-				}
-			}
-		}
-		else if (_interaction->Type() == InteractionType::Dipolar_SA)
-		{
-			// Obtain lists of interacting spins, coupling tensor, and define matrices to hold the magnetic moment operators
-			auto spins1 = _interaction->Group1();
-			auto spins2 = _interaction->Group2();
-			arma::cx_mat S1x;
-			arma::cx_mat S1y;
-			arma::cx_mat S1z;
-			arma::cx_mat S2x;
-			arma::cx_mat S2y;
-			arma::cx_mat S2z;
-
-			// Fill the matrix with the sum of all the interactions
-			for (auto i = spins1.cbegin(); i != spins1.cend(); i++)
-			{
-				for (auto j = spins2.cbegin(); j != spins2.cend(); j++)
-				{
-					// Obtain the magnetic moment operators within the Hilbert space
-
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*i), S1x);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*i), S1y);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*i), S1z);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sx()), (*j), S2x);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sy()), (*j), S2y);
-					this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*j)->Sz()), (*j), S2z);
-
-					if (ATensor != nullptr && !IsIsotropic(*ATensor))
-					{
-						// Get interaction tensor
-						arma::mat D = arma::conv_to<arma::mat>::from(ATensor->LabFrame());
-						// Rotate D-tensor from tensor frame to the molecular frame
-						D = RFrame * D * RFrame.t();
-						// Rotate D-tensor to the lab frame
-						D = _rotationmatrix * D * _rotationmatrix.t();
-
-						// Secular approximation
-						tmp += S1x * S2x * D(0, 0) + S1y * S2y * D(1, 1) + S1z * S2z * D(2, 2);
-
+						if (interaction_type == "Dipolar")
+						{
+							tmp += S1x * S2x * A(0, 0) + S1y * S2y * A(1, 1) + S1z * S2z * A(2, 2);
+						}
+						else if (interaction_type == "Hyperfine")
+						{
+							tmp += S1z * (A(2, 0) * S2x + A(2, 1) * S2y + A(2, 2) * S2z);
+						}
+						else
+						{
+							std::cerr << "Unrecognized type of interaction. Could not construct hamiltonian in the secular approximation." << std::endl;
+						}
 					}
 					else
 					{
