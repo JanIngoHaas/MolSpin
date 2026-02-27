@@ -573,6 +573,151 @@ namespace SpinAPI
         return true;
     }
 
+    bool SpinSpace::PulseOperatorFrameChange_mw(const pulse_ptr &_pulse, arma::cx_mat _rotationmatrix, arma::cx_mat &_out, double &_time) const
+    {
+        // Check whether we want a superspace result
+        if (!this->useSuperspace)
+        {
+            std::cout << "Failed to create a rotation pulse in SS." << std::endl;
+            return false;
+        }
+
+        // Make sure the pulse is valid
+        if (_pulse == nullptr)
+            return false;
+
+        // Create temporary matrix to hold the result
+        arma::cx_mat tmp = arma::zeros<arma::cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
+
+        if (_pulse->Type() == PulseType::MWPulse)
+        {
+            arma::cx_mat Sx;
+            arma::cx_mat Sy;
+            arma::cx_mat Sz;
+
+            arma::vec field;
+            field = _pulse->Field();
+
+            double frequency;
+            frequency = _pulse->Frequency();
+
+            arma::vec prefactorList;
+            std::vector<bool> ignoreTensorsList;
+            std::vector<bool> addCommonPrefactorList;
+            prefactorList = _pulse->PrefactorList();
+            ignoreTensorsList = _pulse->IgnoreTensorsList();
+            addCommonPrefactorList = _pulse->AddCommonPrefactorList();
+
+            auto spinlist = _pulse->Group();
+
+            // Check if all input objects are in order
+            if (prefactorList.n_elem != (spinlist.size() * 3))
+            {
+                std::cerr << "Error: prefactorlist size (" << prefactorList.n_elem << ") mismatches the group size (" << spinlist.size() << ") in pulse (" << _pulse->Name() << "). "
+                          << "Please use the format nx1,ny1,nz1,nx2,ny2,nz2,nx3,ny3,nz3... for different nuclei n1,n2,n3..." << std::endl;
+                return false;
+            }
+
+            if (ignoreTensorsList.size() != spinlist.size())
+            {
+                std::cerr << "Error: ignoretensorslist size (" << ignoreTensorsList.size() << ") != group size (" << spinlist.size() << ") in pulse (" << _pulse->Name() << ")" << std::endl;
+                return false;
+            }
+
+            if (addCommonPrefactorList.size() != spinlist.size())
+            {
+                std::cerr << "Error: commonprefactorlist size (" << addCommonPrefactorList.size() << ") != group size (" << spinlist.size() << ") in pulse (" << _pulse->Name() << ")" << std::endl;
+                return false;
+            }
+
+            // Construct initial matrix
+            arma::cx_mat tmp_part = arma::zeros<arma::cx_mat>(this->HilbertSpaceDimensions(), this->HilbertSpaceDimensions());
+
+            int n = 0;
+            for (auto i = spinlist.cbegin(); i < spinlist.cend(); i++)
+            {
+                if (!ignoreTensorsList.empty())
+                {
+                    if (ignoreTensorsList[n])
+                    {
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*i), Sx);
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*i), Sy);
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*i), Sz);
+                    }
+                    else
+                    {
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Tx()), (*i), Sx);
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Ty()), (*i), Sy);
+                        this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Tz()), (*i), Sz);
+                    }
+                }
+                else
+                {
+                    this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sx()), (*i), Sx);
+                    this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sy()), (*i), Sy);
+                    this->CreateOperator(arma::conv_to<arma::cx_mat>::from((*i)->Sz()), (*i), Sz);
+                }
+
+                if (!prefactorList.is_empty())
+                {
+                    tmp_part = prefactorList(3 * n) * Sx * field(0) * std::cos(frequency * _time) + prefactorList(3 * n + 1) * Sy * field(1) * std::sin(frequency * _time) + prefactorList(3 * n + 2) * Sz * field(2);
+                }
+                else
+                {
+                    tmp_part = Sx * field(0) * std::cos(frequency * _time) + Sy * field(1) * std::sin(frequency * _time) + Sz * field(2);
+                }
+
+                if (!addCommonPrefactorList.empty())
+                {
+                    if (addCommonPrefactorList[n])
+                    {
+                        tmp_part *= 8.79410005e+1;
+                    }
+                }
+
+                tmp += tmp_part;
+                n++;
+            }
+
+            tmp = _rotationmatrix.t() * tmp * _rotationmatrix;
+
+            arma::cx_mat lhs;
+            arma::cx_mat rhs;
+            this->SuperoperatorFromLeftOperator(tmp, lhs);
+            this->SuperoperatorFromRightOperator(tmp, rhs);
+            _out = lhs - rhs;
+        }
+        else
+        {
+            std::cout << "Not implemented yet. Sorry." << std::endl;
+        }
+
+        return true;
+    }
+
+    bool SpinSpace::PulseOperatorFrameChange_mw(const pulse_ptr &_pulse, arma::sp_cx_mat _rotationmatrix, arma::sp_cx_mat &_out, double &_time) const
+    {
+        // Check whether we want a superspace result
+        if (!this->useSuperspace)
+        {
+            std::cout << "Failed to create a rotation pulse in SS." << std::endl;
+            return false;
+        }
+
+        // Make sure the pulse is valid
+        if (_pulse == nullptr)
+            return false;
+
+        arma::cx_mat rotation_dense = arma::conv_to<arma::cx_mat>::from(_rotationmatrix);
+        arma::cx_mat out_dense;
+        if (!this->PulseOperatorFrameChange_mw(_pulse, rotation_dense, out_dense, _time))
+        {
+            return false;
+        }
+        _out = arma::conv_to<arma::sp_cx_mat>::from(out_dense);
+        return true;
+    }
+
     bool SpinSpace::PulseOperatorFrameChange(const pulse_ptr &_pulse, arma::cx_mat _rotationmatrix, arma::cx_mat &_out) const // Pulse in SS
     {
         // Check whether we want a superspace result

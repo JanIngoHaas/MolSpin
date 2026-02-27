@@ -1408,26 +1408,7 @@ namespace RunSection
 							double result = std::abs(arma::cdot(prop_state, Operators[idx] * prop_state));
 							ExptValuesOrientation(0, idx) += result;
 						}
-
-						arma::cx_mat Hessen(krylovsize, krylovsize, arma::fill::zeros); // Upper Hessenberg matrix
-
-						arma::cx_mat KryBasis(InitialStateVector.n_rows * Z, krylovsize, arma::fill::zeros); // Orthogonal krylov subspace
-
-						KryBasis.col(0) = prop_state / norm(prop_state);
-
-						double h_mplusone_m;
-						space_thread.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
-
-						arma::cx_colvec e1;
-						e1.zeros(krylovsize);
-						e1(0) = 1;
-						arma::cx_colvec ek;
-						ek.zeros(krylovsize);
-						ek(krylovsize - 1) = 1;
-
-						arma::cx_vec cx = arma::expmat(Hessen * dt) * e1;
-
-						prop_state = norm(prop_state) * KryBasis * cx;
+						prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, InitialStateVector.n_rows * Z);
 
 						int k = 1;
 
@@ -1439,17 +1420,8 @@ namespace RunSection
 								double result = std::abs(arma::cdot(prop_state, Operators[idx] * prop_state));
 								ExptValuesOrientation(k, idx) += result;
 							}
-
-							Hessen.zeros(krylovsize, krylovsize);
-							KryBasis.zeros(InitialStateVector.n_rows * Z, krylovsize);
-
-							KryBasis.col(0) = prop_state / norm(prop_state);
-
-							space_thread.ArnoldiProcess(H_prop, prop_state, KryBasis, Hessen, krylovsize, h_mplusone_m);
-							cx = arma::expmat(Hessen * dt) * e1;
-
-							// Update the state using Krylov Subspace propagator
-							prop_state = norm(prop_state) * KryBasis * cx;
+							// Update the state using the shared Krylov propagator.
+							prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, InitialStateVector.n_rows * Z);
 							k++;
 						}
 					}

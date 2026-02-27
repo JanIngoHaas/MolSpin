@@ -401,7 +401,7 @@ namespace RunSection
 											{
 												A_sp = A + (arma::cx_double(0.0, -1.0) * pulse_operator);
 
-												rhovec[grid_num] = KrylovPropagator(A_sp, tmp_rho, (*pulse)->Timestep(), 30); // divention of the krylov matrix is m=30 so far. did not check if we chould reduse it or not.
+												rhovec[grid_num] = space.KrylovExpmGeneral(A_sp, tmp_rho, (*pulse)->Timestep(), 30, A_sp.n_rows); // dimension of the Krylov matrix is m=30.
 
 												// Integrate the density vector over the current time interval
 												if (integration)
@@ -549,7 +549,7 @@ namespace RunSection
 												// Build the propagation matrix
 												A_sp = A + (arma::cx_double(0.0, -1.0) * std::cos((*pulse)->Frequency() * t_mid) * pulse_operator);
 
-												rhovec[grid_num] = KrylovPropagator(A_sp, tmp_rho, (*pulse)->Timestep(), 30); // divention of the krylov matrix is m=30 so far. did not check if we chould reduse it or not.
+												rhovec[grid_num] = space.KrylovExpmGeneral(A_sp, tmp_rho, (*pulse)->Timestep(), 30, A_sp.n_rows); // dimension of the Krylov matrix is m=30.
 
 												// Integrate the density vector over the current time interval
 												if (integration)
@@ -704,7 +704,7 @@ namespace RunSection
 												// Build the propagation matrix
 												arma::sp_cx_mat A_sp = A + (arma::cx_double(0.0, -1.0) * pulse_operator);
 
-												rhovec[grid_num] = KrylovPropagator(A_sp, tmp_rho, (*pulse)->Timestep(), 30); // divention of the krylov matrix is m=30 so far. did not check if we chould reduse it or not.
+												rhovec[grid_num] = space.KrylovExpmGeneral(A_sp, tmp_rho, (*pulse)->Timestep(), 30, A_sp.n_rows); // dimension of the Krylov matrix is m=30.
 
 												// Integrate the density vector over the current time interval
 												if (integration)
@@ -837,7 +837,7 @@ namespace RunSection
 											}
 											else
 											{
-												rhovec[grid_num] = KrylovPropagator(A, tmp_rho, (*pulse)->Timestep(), 30); // divention of the krylov matrix is m=30 so far. did not check if we chould reduse it or not.
+												rhovec[grid_num] = space.KrylovExpmGeneral(A, tmp_rho, (*pulse)->Timestep(), 30, A.n_rows); // dimension of the Krylov matrix is m=30.
 
 												// Integrate the density vector over the current time interval
 												if (integration)
@@ -1032,7 +1032,7 @@ namespace RunSection
 								}
 								else
 								{
-									rhovec[grid_num] = KrylovPropagator(A, tmp_rho, this->timestep, 30); // divention of the krylov matrix is m=30 so far. did not check if we chould reduse it or not.
+									rhovec[grid_num] = space.KrylovExpmGeneral(A, tmp_rho, this->timestep, 30, A.n_rows); // dimension of the Krylov matrix is m=30.
 									// Integrate the density vector over the current time interval
 									if (integration)
 									{
@@ -1806,69 +1806,6 @@ namespace RunSection
 		}
 
 		return true;
-	}
-
-	arma::cx_vec TaskStaticSSPowderSpectra::KrylovPropagator(const arma::sp_cx_mat &_A, const arma::cx_vec &_rho, double _dt, int _m)
-	{
-		// Dimension of the space
-		const int N = _rho.n_rows;
-
-		// Compute norm of initial rho (used for normalization and rescaling)
-		double beta = arma::norm(_rho);
-
-		// First Krylov basis vector: normalized initial vector
-		arma::cx_vec v1 = _rho / beta;
-
-		// Matrix whose columns will contain the Krylov basis vectors size: N × m  (large dimension × Krylov subspace size)
-		arma::cx_mat V(N, _m, arma::fill::zeros);
-
-		// Small Hessenberg matrix from Arnoldi projection
-		// Size: m × m
-		arma::cx_mat H(_m, _m, arma::fill::zeros);
-
-		// Set first Krylov basis vector
-		V.col(0) = v1;
-
-		// Arnoldi iteration
-		// Builds an orthonormal basis of the Krylov subspace. K_m(A, rho) = span{rho, A*rho, A^2*rho, ..., A^{m-1}*rho}
-		// At the same time constructs the projected matrix H such that:  A V ≈ V H
-		for (int j = 0; j < _m - 1; ++j)
-		{
-			// Apply _A to current Krylov vector
-			arma::cx_vec w = _A * V.col(j);
-
-			// Orthogonalize against all previous Krylov vectors
-			for (int i = 0; i <= j; ++i)
-			{
-				H(i, j) = arma::cdot(V.col(i), w);
-				w -= H(i, j) * V.col(i);
-			}
-
-			// Norm gives subdiagonal element of Hessenberg matrix
-			H(j + 1, j) = arma::norm(w);
-
-			// If norm is ~0, Krylov space has converged early
-			if (std::abs(H(j + 1, j)) < 1e-14)
-				break;
-
-			// Normalize to obtain next Krylov basis vector
-			V.col(j + 1) = w / H(j + 1, j);
-		}
-
-		// Instead of computing exp(A*dt) directly (large N×N matrix), we approximate as exp(A*dt) _rho ≈ β * V * exp(H*dt) * e1, and H is small (m×m), e1 = (1,0,0,...), β = ||_rho||
-
-		// Compute exponential of small reduced matrix
-		arma::cx_mat expH = arma::expmat(H * _dt);
-
-		// First canonical basis vector in Krylov space
-		arma::cx_vec e1(_m, arma::fill::zeros);
-		e1(0) = 1.0;
-
-		// Compute Krylov-space propagated coefficients
-		arma::cx_vec y = beta * expH * e1;
-
-		// Map vector back to full space
-		return V * y;
 	}
 
 	bool TaskStaticSSPowderSpectra::Create_A_for_current_orientation(auto &_i, SpinAPI::SpinSpace &_space, double &_theta, double &_phi, arma::sp_cx_mat &_A, std::ostream &_logstream) const

@@ -1,8 +1,6 @@
 /////////////////////////////////////////////////////////////////////////
 // TaskStaticSSPowderSpectraNakajimaZwanzig implementation (RunSection module)  developed by Irina Anisimova.
 //
-// Notes: no pulses implemented at the current state
-//
 // Molecular Spin Dynamics Software - developed by Luca Gerhards.
 // (c) 2022 Quantum Biology and Computational Physics Group.
 // See LICENSE.txt for license information.
@@ -51,7 +49,7 @@ namespace RunSection
 		R.set_size(arma::size(lambda));
 		R.zeros();
 
-		auto accumulate_terms = [&](const std::vector<arma::cx_mat> &tensors, const std::vector<double> &input_ampl, const std::vector<double> &input_tau, int terms, int def_g) -> bool {
+			auto accumulate_terms = [&](const std::vector<arma::cx_mat> &tensors, const std::vector<double> &input_ampl, const std::vector<double> &input_tau, int terms, int def_g) -> bool {
 			if (tensors.empty())
 				return true;
 
@@ -156,12 +154,90 @@ namespace RunSection
 					}
 				}
 			}
-			return true;
-		};
+				return true;
+			};
 
-		this->Log() << "Starting NZ relaxation matrix construction for internal powder orientation." << std::endl;
+			auto accumulate_terms_multexpo = [&](const std::vector<arma::cx_mat> &tensors, const arma::mat &ampl_mat, const arma::mat &tau_c_mat, int terms, const std::string &interaction_name) -> bool {
+				if (tensors.empty())
+					return true;
 
-		for (auto interaction = (*_i)->interactions_cbegin(); interaction < (*_i)->interactions_cend(); interaction++)
+				const int num_op = static_cast<int>(tensors.size());
+				const bool no_cross = (terms == 1);
+				const int expected_rows = no_cross ? num_op : (num_op * num_op);
+				const int rows_ampl = static_cast<int>(ampl_mat.n_rows);
+				const int rows_tau = static_cast<int>(tau_c_mat.n_rows);
+				if (rows_ampl < expected_rows || rows_tau < expected_rows)
+				{
+					this->Log() << "NZ def_multexpo=1 for interaction \"" << interaction_name
+					            << "\" requires at least " << expected_rows << " rows in g/tau_c matrices, but got g="
+					            << rows_ampl << ", tau_c=" << rows_tau << ". Skipping this interaction contribution."
+					            << std::endl;
+					return true;
+				}
+
+				const int cols_ampl = static_cast<int>(ampl_mat.n_cols);
+				const int cols_tau = static_cast<int>(tau_c_mat.n_cols);
+				const int n_cols = (cols_ampl < cols_tau) ? cols_ampl : cols_tau;
+				if (n_cols < 1)
+				{
+					this->Log() << "NZ def_multexpo=1 for interaction \"" << interaction_name
+					            << "\" has empty g/tau_c matrices. Skipping this interaction contribution." << std::endl;
+					return true;
+				}
+				if (cols_ampl != cols_tau)
+				{
+					this->Log() << "NZ def_multexpo=1 for interaction \"" << interaction_name
+					            << "\" has different numbers of columns in g and tau_c matrices (g=" << cols_ampl
+					            << ", tau_c=" << cols_tau << "). Using the first " << n_cols << " columns." << std::endl;
+				}
+
+				arma::cx_mat SpecDens;
+				SpecDens.set_size(arma::size(lambda));
+				arma::cx_mat SpecDens_n;
+				SpecDens_n.set_size(arma::size(lambda));
+				arma::cx_mat tmp_R;
+				tmp_R.set_size(arma::size(lambda));
+
+				for (int k = 0; k < num_op; k++)
+				{
+					const int s_start = no_cross ? k : 0;
+					const int s_end = no_cross ? (k + 1) : num_op;
+					for (int s = s_start; s < s_end; s++)
+					{
+						const int row = no_cross ? k : (k * num_op + s);
+						SpecDens.zeros();
+						bool has_nonzero_component = false;
+
+						for (int n = 0; n < n_cols; n++)
+						{
+							const double ampl = ampl_mat(row, n);
+							const double tau = tau_c_mat(row, n);
+							if (std::abs(ampl) <= 1.0e-20 || std::abs(tau) <= 1.0e-20)
+								continue;
+
+							SpecDens_n.zeros();
+							if (!this->ConstructSpecDensSpecificSpectra(static_cast<std::complex<double>>(ampl),
+							                                            static_cast<std::complex<double>>(tau), lambda, SpecDens_n))
+								return false;
+							SpecDens += SpecDens_n;
+							has_nonzero_component = true;
+						}
+
+						if (!has_nonzero_component)
+							continue;
+
+						tmp_R.zeros();
+						if (!this->NakajimaZwanzigtensorSpectra(tensors[static_cast<size_t>(k)], tensors[static_cast<size_t>(s)], SpecDens, tmp_R))
+							return false;
+						R += tmp_R;
+					}
+				}
+				return true;
+			};
+
+			this->Log() << "Starting NZ relaxation matrix construction for internal powder orientation." << std::endl;
+
+			for (auto interaction = (*_i)->interactions_cbegin(); interaction < (*_i)->interactions_cend(); interaction++)
 		{
 			bool interaction_relaxation = false;
 			const bool has_relax_flag = (*interaction)->Properties()->Get("relaxation", interaction_relaxation);
@@ -170,33 +246,47 @@ namespace RunSection
 
 			int terms = 1;
 			int def_g = 1;
-			int def_multexpo = 0;
-			int ops = 1;
-			int coeff = 0;
+				int def_multexpo = 0;
+				int ops = 1;
+				int coeff = 0;
 			(void)(*interaction)->Properties()->Get("terms", terms);
 			(void)(*interaction)->Properties()->Get("def_g", def_g);
-			(void)(*interaction)->Properties()->Get("def_multexpo", def_multexpo);
-			(void)(*interaction)->Properties()->Get("ops", ops);
-			(void)(*interaction)->Properties()->Get("coeff", coeff);
+				(void)(*interaction)->Properties()->Get("def_multexpo", def_multexpo);
+				(void)(*interaction)->Properties()->Get("ops", ops);
+				(void)(*interaction)->Properties()->Get("coeff", coeff);
 
-			if (def_multexpo == 1)
-			{
-				this->Log() << "NZ def_multexpo=1 is not supported in powder-NZ task yet for interaction \"" << (*interaction)->Name() << "\"; skipping this interaction." << std::endl;
-				continue;
-			}
-
-			std::vector<double> tau_c_list;
-			std::vector<double> ampl_list;
-			if (!(*interaction)->Properties()->GetList("tau_c", tau_c_list))
-			{
-				this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has no tau_c list; skipping." << std::endl;
-				continue;
-			}
-			if (!(*interaction)->Properties()->GetList("g", ampl_list))
-			{
-				this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has no g list; skipping." << std::endl;
-				continue;
-			}
+				bool use_multexpo = false;
+				arma::mat tau_c_mat;
+				arma::mat ampl_mat;
+				std::vector<double> tau_c_list;
+				std::vector<double> ampl_list;
+				if (def_multexpo == 1)
+				{
+					if (!(*interaction)->Properties()->GetMatrix("tau_c", tau_c_mat))
+					{
+						this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has def_multexpo=1 but no valid tau_c matrix; skipping." << std::endl;
+						continue;
+					}
+					if (!(*interaction)->Properties()->GetMatrix("g", ampl_mat))
+					{
+						this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has def_multexpo=1 but no valid g matrix; skipping." << std::endl;
+						continue;
+					}
+					use_multexpo = true;
+				}
+				else
+				{
+					if (!(*interaction)->Properties()->GetList("tau_c", tau_c_list))
+					{
+						this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has no tau_c list; skipping." << std::endl;
+						continue;
+					}
+					if (!(*interaction)->Properties()->GetList("g", ampl_list))
+					{
+						this->Log() << "NZ interaction \"" << (*interaction)->Name() << "\" has no g list; skipping." << std::endl;
+						continue;
+					}
+				}
 
 			if ((*interaction)->Type() == SpinAPI::InteractionType::SingleSpin)
 			{
@@ -245,13 +335,23 @@ namespace RunSection
 					}
 
 					for (auto &tensor : tensors)
+					{
 						tensor = (_eigenvec.t() * tensor * _eigenvec);
+					}
 
-					if (!accumulate_terms(tensors, ampl_list, tau_c_list, terms, def_g))
-						return false;
+						if (use_multexpo)
+						{
+							if (!accumulate_terms_multexpo(tensors, ampl_mat, tau_c_mat, terms, (*interaction)->Name()))
+								return false;
+						}
+						else
+						{
+							if (!accumulate_terms(tensors, ampl_list, tau_c_list, terms, def_g))
+								return false;
+						}
+					}
 				}
-			}
-			else if ((*interaction)->Type() == SpinAPI::InteractionType::DoubleSpin)
+				else if ((*interaction)->Type() == SpinAPI::InteractionType::DoubleSpin)
 			{
 				auto group1 = (*interaction)->Group1();
 				auto group2 = (*interaction)->Group2();
@@ -333,13 +433,23 @@ namespace RunSection
 						}
 
 						for (auto &tensor : tensors)
+						{
 							tensor = (_eigenvec.t() * tensor * _eigenvec);
+						}
 
-						if (!accumulate_terms(tensors, ampl_list, tau_c_list, terms, def_g))
-							return false;
+							if (use_multexpo)
+							{
+								if (!accumulate_terms_multexpo(tensors, ampl_mat, tau_c_mat, terms, (*interaction)->Name()))
+									return false;
+							}
+							else
+							{
+								if (!accumulate_terms(tensors, ampl_list, tau_c_list, terms, def_g))
+									return false;
+							}
+						}
 					}
 				}
-			}
 		}
 
 		arma::cx_mat lhs;
@@ -398,23 +508,17 @@ namespace RunSection
 	{
 		this->Log() << "Running method StaticSS-PowderSpectra-NakajimaZwanzig." << std::endl;
 
-		// If this is the first step, write first part of header to the data file
 		if (this->RunSettings()->CurrentStep() == 1)
 		{
 			this->WriteHeader(this->Data());
 		}
 
-		// Decline density matrix and density vector variables
 		arma::cx_mat rho0;
 		arma::cx_vec rho0vec;
-
-		// Obtain spin systems
 		auto systems = this->SpinSystems();
 
-		// Loop through all SpinSystems
 		for (auto i = systems.cbegin(); i != systems.cend(); i++)
 		{
-			// Make sure we have an initial state
 			auto initial_states = (*i)->InitialState();
 			if (initial_states.size() < 1)
 			{
@@ -424,7 +528,6 @@ namespace RunSection
 
 			this->Log() << "\nStarting with SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
 
-			// Obtain a SpinSpace to describe the system
 			SpinAPI::SpinSpace space(*(*i));
 			space.UseSuperoperatorSpace(true);
 			space.SetReactionOperatorType(this->reactionOperators);
@@ -432,7 +535,6 @@ namespace RunSection
 			std::vector<double> weights;
 			weights = (*i)->Weights();
 
-			// Normalize the weights
 			double sum_weights = std::accumulate(weights.begin(), weights.end(), 0.0);
 			if (sum_weights > 0)
 			{
@@ -442,11 +544,9 @@ namespace RunSection
 				}
 			}
 
-			// Get the initial state
 			if (weights.size() > 1)
 			{
 				this->Log() << "Using weighted density matrix for initial state. Be sure that the sum of weights equals to 1." << std::endl;
-				// Get the initial state
 				int counter = 0;
 				for (auto j = initial_states.cbegin(); j != initial_states.cend(); j++)
 				{
@@ -477,18 +577,13 @@ namespace RunSection
 				}
 			}
 			else
-			// Get the initial state without weights
 			{
 				for (auto j = initial_states.cbegin(); j != initial_states.cend(); j++)
 				{
 					arma::cx_mat tmp_rho0;
-
-					// Get the initial state in thermal equilibrium
-					if ((*j) == nullptr) // "Thermal initial state"
+					if ((*j) == nullptr)
 					{
 						this->Log() << "Initial state = thermal " << std::endl;
-
-						// Get the thermalhamiltonianlist
 						std::vector<std::string> thermalhamiltonian_list = (*i)->ThermalHamiltonianList();
 
 						this->Log() << "ThermalHamiltonianList = [";
@@ -496,22 +591,20 @@ namespace RunSection
 						{
 							this->Log() << thermalhamiltonian_list[j];
 							if (j < thermalhamiltonian_list.size() - 1)
-								this->Log() << ", "; // Add a comma between elements
+								this->Log() << ", ";
 						}
 						this->Log() << "]" << std::endl;
 
-						// Get temperature
 						double temperature = (*i)->Temperature();
 						this->Log() << "Temperature = " << temperature << "K" << std::endl;
 
-						// Get the initial state with thermal equilibrium
 						if (!space.GetThermalState(space, temperature, thermalhamiltonian_list, tmp_rho0))
 						{
 							this->Log() << "Failed to obtain projection matrix onto thermal state, initial state of SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
 							continue;
 						}
 					}
-					else // Get the initial state without thermal equilibrium
+					else
 					{
 						if (!space.GetState(*j, tmp_rho0))
 						{
@@ -520,7 +613,6 @@ namespace RunSection
 						}
 					}
 
-					// Obtain the initial density matrix
 					if (j == initial_states.cbegin())
 					{
 						rho0 = tmp_rho0;
@@ -532,25 +624,19 @@ namespace RunSection
 				}
 			}
 
-			rho0 /= arma::trace(rho0); // The density operator should have a trace of 1
-
-			// Convert initial state to superoperator space
+			rho0 /= arma::trace(rho0);
 			if (!space.OperatorToSuperspace(rho0, rho0vec))
 			{
 				this->Log() << "Failed to convert initial state density operator to superspace." << std::endl;
 				continue;
 			}
 
-			// Read in input parameters
-
-			// Read the method from the input file
 			std::string Method;
 			if (!this->Properties()->Get("method", Method))
 			{
 				this->Log() << "Failed to obtain an input for a Method. Please specify method = timeinf or method = timeevo." << std::endl;
 			}
 
-			// Read if the result should be integrated or not if method.
 			bool integration = false;
 			if (!this->Properties()->Get("integration", integration))
 			{
@@ -558,271 +644,648 @@ namespace RunSection
 			}
 			this->Log() << "Integration of the yield in time on a grid  = " << integration << std::endl;
 
-			// Read CIDSP from the input file
 			bool CIDSP = false;
 			if (!this->Properties()->Get("cidsp", CIDSP))
 			{
 				this->Log() << "Failed to obtain an input for a CIDSP. Plese use cidsp = true/false. Using cidsp = false by default. " << std::endl;
 			}
 
-			// Read in the number of points on the sampling grid
 			int numPoints = 1000;
 			if (!this->Properties()->Get("powdersamplingpoints", numPoints))
 			{
 				this->Log() << "Failed to obtain an input for a number of sampling points. Plese use powdersamplingpoints = N. Using powdersamplingpoints = 1000 by default. " << std::endl;
 			}
 
-			double Printedtime = 0;
+			double Printedtime = 0.0;
 
-			// Construct grid
 			std::vector<std::tuple<double, double, double>> grid;
 			if (!this->CreateUniformGrid(numPoints, grid))
 			{
 				this->Log() << "Failed to obtain an Uniform grid." << std::endl;
 			}
 
-			// Method Propagation to infinity
-			if (Method.compare("timeinf") == 0)
+			std::string Timewindow;
+			if (!this->Properties()->Get("printtimeframe", Timewindow))
 			{
-				// Perform the calculation
-				this->Log() << "Ready to perform calculation." << std::endl;
+				this->Log() << "Failed to obtain an input for a printtimeframe. Please choose printtimeframe =  pulse / freeevo / full. Using full propagation evolution window by default" << std::endl;
+				Timewindow = "full";
+			}
+			this->Log() << "Timewindow for the propagation printing: " << Timewindow << std::endl;
 
-				this->Log() << "Method = " << Method << std::endl;
+			std::string Integrationwindow;
+			if (!this->Properties()->Get("integrationtimeframe", Integrationwindow))
+			{
+				this->Log() << "Failed to obtain an input for a integrationtimeframe. Please choose integrationtimeframe =  pulse / freeevo / full. Using freeevo propagation evolution window by default" << std::endl;
+				Integrationwindow = "freeevo";
+			}
+			this->Log() << "Timewindow for the propagation integration: " << Integrationwindow << std::endl;
 
-				std::vector<arma::cx_vec> rho_tmp(numPoints);
-				for (auto &v : rho_tmp)
-					v.zeros(size(rho0vec));
+			std::vector<std::string> HamiltonianH0list;
+			if (!this->Properties()->GetList("hamiltonianh0list", HamiltonianH0list, ','))
+			{
+				this->Log() << "Failed to obtain an input for a HamiltonianH0." << std::endl;
+			}
 
-				arma::cx_vec integral;
-				integral.zeros(size(rho0vec));
+			std::vector<std::string> HamiltonianH1list;
+			if (!this->Properties()->GetList("hamiltonianh1list", HamiltonianH1list, ','))
+			{
+				this->Log() << "Failed to obtain an input for a HamiltonianH1." << std::endl;
+			}
 
-				// Initialize a first step
-				arma::cx_vec rhovec = rho0vec;
+			struct OrientationState
+			{
+				bool valid = false;
+				double weight = 0.0;
+				arma::cx_mat A_nz;
+				arma::cx_mat eigen_vec;
+				arma::cx_vec rhovec;
+			};
 
-				for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+			std::vector<OrientationState> orientation_states(static_cast<size_t>(numPoints));
+			int valid_orientations = 0;
+
+			for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+			{
+				auto [theta, phi, weight] = grid[grid_num];
+				if (numPoints <= 1)
 				{
-					auto [theta, phi, weight] = grid[grid_num];
+					theta = 0.0;
+					phi = 0.0;
+					weight = 1.0;
+				}
 
-					// Make the option without powdering from inside possible
-					if (numPoints <= 1)
+				orientation_states[static_cast<size_t>(grid_num)].weight = weight;
+
+				arma::mat Rot_mat;
+				double gamma = 0.0;
+				if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
+				{
+					this->Log() << "Failed to obtain a rotation matrix for the powder orientation." << std::endl;
+					continue;
+				}
+
+				space.UseSuperoperatorSpace(false);
+				arma::sp_cx_mat H0;
+				if (!space.BaseHamiltonianRotated_SA(HamiltonianH0list, Rot_mat, H0))
+				{
+					this->Log() << "Failed to obtain HamiltonianH0 for powder orientation " << grid_num << "." << std::endl;
+					continue;
+				}
+
+				arma::sp_cx_mat H1;
+				if (!space.ThermalHamiltonian(HamiltonianH1list, H1))
+				{
+					this->Log() << "Failed to obtain HamiltonianH1 for powder orientation " << grid_num << "." << std::endl;
+					continue;
+				}
+
+				arma::cx_mat H = arma::conv_to<arma::cx_mat>::from(H0 + H1);
+				arma::cx_mat A_nz;
+				arma::cx_mat eigen_vec;
+				if (!this->BuildNakajimaZwanzigLiouvillian(i, space, H, A_nz, eigen_vec))
+				{
+					this->Log() << "Failed to build NZ Liouvillian for powder orientation " << grid_num << "." << std::endl;
+					continue;
+				}
+
+				space.UseSuperoperatorSpace(true);
+				arma::cx_mat rho0_eig = (eigen_vec.t() * rho0 * eigen_vec);
+				rho0_eig /= arma::trace(rho0_eig);
+				arma::cx_vec rho0vec_eig;
+				if (!space.OperatorToSuperspace(rho0_eig, rho0vec_eig))
+				{
+					this->Log() << "Failed to convert initial state to superspace in NZ eigenbasis for orientation " << grid_num << "." << std::endl;
+					continue;
+				}
+
+				OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+				current.valid = true;
+				current.A_nz = std::move(A_nz);
+				current.eigen_vec = std::move(eigen_vec);
+				current.rhovec = std::move(rho0vec_eig);
+				valid_orientations += 1;
+			}
+
+			if (valid_orientations < 1)
+			{
+				this->Log() << "No valid powder orientations could be prepared for SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
+				continue;
+			}
+
+			auto to_lab_and_accumulate = [&](const arma::cx_vec &eig_vec, const arma::cx_mat &eigen_vec, double weight, arma::cx_vec &accumulator) -> bool {
+				arma::cx_vec out_vec_lab;
+				out_vec_lab.zeros(rho0vec.n_elem);
+				if (!this->ConvertSuperspaceToLab(space, eig_vec, eigen_vec, out_vec_lab))
+				{
+					return false;
+				}
+				accumulator += weight * out_vec_lab;
+				return true;
+			};
+
+			std::vector<std::tuple<std::string, double>> Pulsesequence;
+			if (this->Properties()->GetPulseSequence("pulsesequence", Pulsesequence))
+			{
+				this->Log() << "Pulsesequence" << std::endl;
+
+				for (const auto &seq : Pulsesequence)
+				{
+					this->Log() << std::get<0>(seq) << ", " << std::get<1>(seq) << std::endl;
+
+					std::string pulse_name = std::get<0>(seq);
+					double timerelaxation = std::get<1>(seq);
+					bool pulse_found = false;
+
+					for (auto pulse = (*i)->pulses_cbegin(); pulse < (*i)->pulses_cend(); pulse++)
 					{
-						theta = 0.0;
-						phi = 0.0;
-						weight = 1.0;
-					}
-
-					// Construct the rotation matrix
-					arma::mat Rot_mat;
-					double gamma = 0;
-					if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
-					{
-						this->Log() << "Failed to obtain an Lebedev grid." << std::endl;
-					}
-
-					// Construct the hamiltonian H0
-					std::vector<std::string> HamiltonianH0list;
-					if (!this->Properties()->GetList("hamiltonianh0list", HamiltonianH0list, ','))
-					{
-						this->Log() << "Failed to obtain an input for a HamiltonianH0." << std::endl;
-					}
-
-						space.UseSuperoperatorSpace(false);
-						arma::sp_cx_mat H0;
-						if (!space.BaseHamiltonianRotated_SA(HamiltonianH0list, Rot_mat, H0))
+						if ((*pulse)->Name().compare(pulse_name) != 0)
 						{
-							this->Log() << "Failed to obtain Hamiltonian in superspace." << std::endl;
 							continue;
 						}
 
-						std::vector<std::string> HamiltonianH1list;
-						if (!this->Properties()->GetList("hamiltonianh1list", HamiltonianH1list, ','))
-						{
-							this->Log() << "Failed to obtain an input for a HamiltonianH1." << std::endl;
-						}
-
-						arma::sp_cx_mat H1;
-						if (!space.ThermalHamiltonian(HamiltonianH1list, H1))
-						{
-							this->Log() << "Failed to obtain Hamiltonian in superspace." << std::endl;
-							continue;
-						}
-
-						arma::cx_mat H = arma::conv_to<arma::cx_mat>::from(H0 + H1);
-						arma::cx_mat A_nz;
-						arma::cx_mat eigen_vec;
-						if (!this->BuildNakajimaZwanzigLiouvillian(i, space, H, A_nz, eigen_vec))
-						{
-							this->Log() << "Failed to build NZ Liouvillian for current powder orientation." << std::endl;
-							continue;
-						}
-
+						pulse_found = true;
 						space.UseSuperoperatorSpace(true);
 
-						arma::cx_mat rho0_eig = (eigen_vec.t() * rho0 * eigen_vec);
-						rho0_eig /= arma::trace(rho0_eig);
-						arma::cx_vec rho0vec_eig;
-						if (!space.OperatorToSuperspace(rho0_eig, rho0vec_eig))
+						if ((*pulse)->Type() == SpinAPI::PulseType::InstantPulse)
 						{
-							this->Log() << "Failed to convert initial state to superspace in NZ eigenbasis." << std::endl;
-							continue;
-						}
-
-						arma::cx_vec result_eig = -solve(A_nz, rho0vec_eig);
-						arma::cx_vec result_lab;
-						result_lab.zeros(size(rho0vec));
-						if (!this->ConvertSuperspaceToLab(space, result_eig, eigen_vec, result_lab))
-						{
-							this->Log() << "Failed to transform NZ result back to lab frame." << std::endl;
-							continue;
-						}
-
-						// Integrate over all grid points in the lab basis.
-						integral += weight * result_lab;
-					}
-
-				rhovec = integral;
-
-				if (!this->ProjectAndPrintOutputLineInf(i, space, rhovec, Printedtime, this->timestep, CIDSP, this->Data(), this->Log()))
-					this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
-
-				this->Log() << "Done with calculation." << std::endl;
-			}
-			// Method TIME EVOLUTION
-			else if (Method.compare("timeevo") == 0)
-			{
-
-				if (!this->totaltime == 0)
-				{
-					// Perform the calculation
-					this->Log() << "Ready to perform calculation." << std::endl;
-
-					this->Log() << "Method = " << Method << std::endl;
-
-					// Create a holder vector for an averaged density
-					int firststep = 0;
-					unsigned int time_steps = static_cast<unsigned int>(std::abs(this->totaltime / this->timestep));
-					std::vector<arma::cx_vec> rho_avg(time_steps + 1);
-					for (auto &v : rho_avg)
-						v.zeros(size(rho0vec));
-
-					for (int grid_num = 0; grid_num < numPoints; ++grid_num)
-					{
-						auto [theta, phi, weight] = grid[grid_num];
-
-						// Make the option without powdering from inside possible
-						if (numPoints <= 1)
-						{
-							theta = 0.0;
-							phi = 0.0;
-							weight = 1.0;
-						}
-
-							// Create rotation matrix
-							arma::mat Rot_mat;
-							double gamma = 0;
-							if (!this->CreateRotationMatrix(gamma, theta, phi, Rot_mat))
+							for (int grid_num = 0; grid_num < numPoints; ++grid_num)
 							{
-							this->Log() << "Failed to obtain an Lebedev grid." << std::endl;
-						}
-
-						// Create Hamiltonian H0
-						std::vector<std::string> HamiltonianH0list;
-						if (!this->Properties()->GetList("hamiltonianh0list", HamiltonianH0list, ','))
-						{
-							this->Log() << "Failed to obtain an input for a HamiltonianH0." << std::endl;
-						}
-
-							space.UseSuperoperatorSpace(false);
-							arma::sp_cx_mat H0;
-							if (!space.BaseHamiltonianRotated_SA(HamiltonianH0list, Rot_mat, H0))
-							{
-								this->Log() << "Failed to obtain Hamiltonian in superspace." << std::endl;
-								continue;
-							}
-
-							std::vector<std::string> HamiltonianH1list;
-							if (!this->Properties()->GetList("hamiltonianh1list", HamiltonianH1list, ','))
-							{
-								this->Log() << "Failed to obtain an input for a HamiltonianH1." << std::endl;
-							}
-
-							arma::sp_cx_mat H1;
-							if (!space.ThermalHamiltonian(HamiltonianH1list, H1))
-							{
-								this->Log() << "Failed to obtain Hamiltonian in superspace." << std::endl;
-								continue;
-							}
-
-							arma::cx_mat H = arma::conv_to<arma::cx_mat>::from(H0 + H1);
-							arma::cx_mat A_nz;
-							arma::cx_mat eigen_vec;
-							if (!this->BuildNakajimaZwanzigLiouvillian(i, space, H, A_nz, eigen_vec))
-							{
-								this->Log() << "Failed to build NZ Liouvillian for current powder orientation." << std::endl;
-								continue;
-							}
-
-							space.UseSuperoperatorSpace(true);
-
-							arma::cx_mat rho0_eig = (eigen_vec.t() * rho0 * eigen_vec);
-							rho0_eig /= arma::trace(rho0_eig);
-							arma::cx_vec rho0vec_eig;
-							if (!space.OperatorToSuperspace(rho0_eig, rho0vec_eig))
-							{
-								this->Log() << "Failed to convert initial state to superspace in NZ eigenbasis." << std::endl;
-								continue;
-							}
-
-							arma::cx_vec rhoavg_n_eig;
-							rhoavg_n_eig.zeros(size(rho0vec_eig));
-
-							std::pair<arma::sp_cx_mat, arma::cx_vec> G;
-							arma::sp_cx_mat A_sp = arma::conv_to<arma::sp_cx_mat>::from(arma::expmat(A_nz * this->timestep));
-							G = std::pair<arma::sp_cx_mat, arma::cx_vec>(A_sp, rho0vec_eig);
-
-							for (unsigned int n = firststep; n <= time_steps; n++)
-							{
-								arma::cx_vec out_vec_eig;
-								if (n == 0)
+								OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+								if (!current.valid)
 								{
-									out_vec_eig = G.second;
-								}
-								else
-								{
-									arma::cx_vec rhovec_eig = G.first * G.second;
-									if (integration)
-									{
-										rhoavg_n_eig += this->timestep * (G.second + rhovec_eig) / 2;
-									}
-									G.second = rhovec_eig;
-									if (!rhoavg_n_eig.is_zero(0))
-									{
-										out_vec_eig = rhoavg_n_eig;
-									}
-									else
-									{
-										out_vec_eig = rhovec_eig;
-									}
-								}
-
-								arma::cx_vec out_vec_lab;
-								out_vec_lab.zeros(size(rho0vec));
-								if (!this->ConvertSuperspaceToLab(space, out_vec_eig, eigen_vec, out_vec_lab))
-								{
-									this->Log() << "Failed to transform NZ time-domain result back to lab frame." << std::endl;
 									continue;
 								}
 
-								rho_avg[n] += weight * out_vec_lab;
+								arma::cx_mat pulse_operator;
+								if (!space.PulseOperatorFrameChange((*pulse), current.eigen_vec, pulse_operator))
+								{
+									this->Log() << "Failed to create pulse operator in NZ eigenbasis for orientation " << grid_num << "." << std::endl;
+									continue;
+								}
+
+								current.rhovec = pulse_operator * current.rhovec;
+							}
+						}
+						else if ((*pulse)->Type() == SpinAPI::PulseType::LongPulseStaticField || (*pulse)->Type() == SpinAPI::PulseType::LongPulse)
+						{
+							int firststep = (Printedtime == 0.0) ? 0 : 1;
+							unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / (*pulse)->Timestep()));
+							std::vector<arma::cx_vec> rho_avg(steps + 1);
+							for (auto &v : rho_avg)
+							{
+								v.zeros(rho0vec.n_elem);
+							}
+
+							for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+							{
+								OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+								if (!current.valid)
+								{
+									continue;
+								}
+
+								arma::cx_mat pulse_operator;
+								if (!space.PulseOperatorFrameChange((*pulse), current.eigen_vec, pulse_operator))
+								{
+									this->Log() << "Failed to create pulse operator in NZ eigenbasis for orientation " << grid_num << "." << std::endl;
+									continue;
+								}
+
+								arma::cx_vec rhoavg_n;
+								rhoavg_n.zeros(current.rhovec.n_elem);
+								arma::cx_vec tmp_rho = current.rhovec;
+
+								arma::cx_mat A_exp;
+								arma::sp_cx_mat A_sp;
+								bool constant_matrix_available = ((*pulse)->Type() == SpinAPI::PulseType::LongPulseStaticField);
+								bool use_krylov = false;
+
+								if (constant_matrix_available)
+								{
+									arma::cx_mat A_total = current.A_nz + (arma::cx_double(0.0, -1.0) * pulse_operator);
+									use_krylov = (A_total.n_rows > 64);
+									if (use_krylov)
+									{
+										A_sp = arma::conv_to<arma::sp_cx_mat>::from(A_total);
+									}
+									else
+									{
+										A_exp = arma::expmat(A_total * (*pulse)->Timestep());
+									}
+								}
+
+								for (unsigned int n = static_cast<unsigned int>(firststep); n <= steps; n++)
+								{
+									arma::cx_vec out_vec_eig;
+									if (n == 0)
+									{
+										out_vec_eig = tmp_rho;
+									}
+									else
+									{
+										if (constant_matrix_available)
+										{
+											if (use_krylov)
+											{
+												out_vec_eig = space.KrylovExpmGeneral(A_sp, tmp_rho, (*pulse)->Timestep(), 30, A_sp.n_rows);
+											}
+											else
+											{
+												out_vec_eig = A_exp * tmp_rho;
+											}
+										}
+										else
+										{
+											if (current.A_nz.n_rows <= 64)
+											{
+												double t = n * (*pulse)->Timestep();
+												arma::cx_mat A_step = current.A_nz + (arma::cx_double(0.0, -1.0) * pulse_operator * std::cos((*pulse)->Frequency() * t));
+												out_vec_eig = arma::expmat(A_step * (*pulse)->Timestep()) * tmp_rho;
+											}
+											else
+											{
+												double t = n * (*pulse)->Timestep();
+												double t_mid = t + 0.5 * (*pulse)->Timestep();
+												arma::sp_cx_mat A_step = arma::conv_to<arma::sp_cx_mat>::from(current.A_nz + (arma::cx_double(0.0, -1.0) * std::cos((*pulse)->Frequency() * t_mid) * pulse_operator));
+												out_vec_eig = space.KrylovExpmGeneral(A_step, tmp_rho, (*pulse)->Timestep(), 30, A_step.n_rows);
+											}
+										}
+
+										if (integration && (Integrationwindow.compare("freeevo") != 0))
+										{
+											rhoavg_n += (*pulse)->Timestep() * (tmp_rho + out_vec_eig) / 2.0;
+										}
+
+										tmp_rho = out_vec_eig;
+										if (!rhoavg_n.is_zero(0))
+										{
+											out_vec_eig = rhoavg_n;
+										}
+									}
+
+									current.rhovec = out_vec_eig;
+
+									if (Timewindow.compare("freeevo") != 0)
+									{
+										if (!to_lab_and_accumulate(out_vec_eig, current.eigen_vec, current.weight, rho_avg[n]))
+										{
+											this->Log() << "Failed to transform pulse result back to lab frame for orientation " << grid_num << "." << std::endl;
+										}
+									}
+								}
+							}
+
+							if (Timewindow.compare("freeevo") != 0)
+							{
+								for (unsigned int n = static_cast<unsigned int>(firststep); n <= steps; n++)
+								{
+									if (!this->ProjectAndPrintOutputLine(i, space, rho_avg[n], Printedtime, (*pulse)->Timestep(), n, CIDSP, this->Data(), this->Log()))
+									{
+										this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+									}
+								}
+							}
+						}
+							else if ((*pulse)->Type() == SpinAPI::PulseType::MWPulse)
+							{
+								int firststep = (Printedtime == 0.0) ? 0 : 1;
+								unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / (*pulse)->Timestep()));
+								std::vector<arma::cx_vec> rho_avg(steps + 1);
+								for (auto &v : rho_avg)
+								{
+									v.zeros(rho0vec.n_elem);
+								}
+
+								for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+								{
+									OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+									if (!current.valid)
+									{
+										continue;
+									}
+
+									arma::cx_vec rhoavg_n;
+									rhoavg_n.zeros(current.rhovec.n_elem);
+									arma::cx_vec tmp_rho = current.rhovec;
+
+									for (unsigned int n = static_cast<unsigned int>(firststep); n <= steps; n++)
+									{
+										arma::cx_vec out_vec_eig;
+										if (n == 0)
+										{
+											out_vec_eig = tmp_rho;
+										}
+										else
+										{
+											double t_eval = (current.A_nz.n_rows <= 64) ? (n * (*pulse)->Timestep()) : (n * (*pulse)->Timestep() + 0.5 * (*pulse)->Timestep());
+											arma::cx_mat pulse_operator;
+											if (!space.PulseOperatorFrameChange_mw((*pulse), current.eigen_vec, pulse_operator, t_eval))
+											{
+												this->Log() << "Failed to create frame-changed microwave pulse operator in NZ eigenbasis for orientation " << grid_num << "." << std::endl;
+												continue;
+											}
+
+											arma::sp_cx_mat A_step = arma::conv_to<arma::sp_cx_mat>::from(current.A_nz + (arma::cx_double(0.0, -1.0) * pulse_operator));
+											if (arma::norm(tmp_rho, 2) < 1.0e-20)
+											{
+												out_vec_eig = tmp_rho;
+											}
+											else
+											{
+												try
+												{
+													out_vec_eig = space.KrylovExpmGeneral(A_step, tmp_rho, (*pulse)->Timestep(), 16, A_step.n_rows);
+												}
+												catch (const std::exception &e)
+												{
+													this->Log() << "Krylov MWPulse propagation failed for orientation " << grid_num << " (" << e.what() << "). Retrying with smaller substeps." << std::endl;
+													const int substeps = 8;
+													const double sub_dt = (*pulse)->Timestep() / static_cast<double>(substeps);
+													arma::cx_vec sub_rho = tmp_rho;
+													bool sub_ok = true;
+													for (int sub = 0; sub < substeps; ++sub)
+													{
+														try
+														{
+															sub_rho = space.KrylovExpmGeneral(A_step, sub_rho, sub_dt, 16, A_step.n_rows);
+														}
+														catch (...)
+														{
+															sub_ok = false;
+															break;
+														}
+													}
+													out_vec_eig = sub_ok ? sub_rho : tmp_rho;
+												}
+											}
+
+											if (integration && (Integrationwindow.compare("freeevo") != 0))
+											{
+												rhoavg_n += (*pulse)->Timestep() * (tmp_rho + out_vec_eig) / 2.0;
+											}
+
+											tmp_rho = out_vec_eig;
+											if (!rhoavg_n.is_zero(0))
+											{
+												out_vec_eig = rhoavg_n;
+											}
+										}
+
+										current.rhovec = out_vec_eig;
+
+										if (Timewindow.compare("freeevo") != 0)
+										{
+											if (!to_lab_and_accumulate(out_vec_eig, current.eigen_vec, current.weight, rho_avg[n]))
+											{
+												this->Log() << "Failed to transform microwave pulse result back to lab frame for orientation " << grid_num << "." << std::endl;
+											}
+										}
+									}
+								}
+
+								if (Timewindow.compare("freeevo") != 0)
+								{
+									for (unsigned int n = static_cast<unsigned int>(firststep); n <= steps; n++)
+									{
+										if (!this->ProjectAndPrintOutputLine(i, space, rho_avg[n], Printedtime, (*pulse)->Timestep(), n, CIDSP, this->Data(), this->Log()))
+										{
+											this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+										}
+									}
+								}
+							}
+							else
+							{
+								this->Log() << "Current pulse type is not implemented. Please use type = InstantPulse / LongPulseStaticField / LongPulse / MWPulse." << std::endl;
+							}
+
+						if (Timewindow.compare("freeevo") != 0)
+						{
+							Printedtime += (*pulse)->Pulsetime();
+						}
+
+						if (timerelaxation != 0.0)
+						{
+							unsigned int steps = static_cast<unsigned int>(std::abs(timerelaxation / (*pulse)->Timestep()));
+							std::vector<arma::cx_vec> rho_avg(steps + 1);
+							for (auto &v : rho_avg)
+							{
+								v.zeros(rho0vec.n_elem);
+							}
+
+							for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+							{
+								OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+								if (!current.valid)
+								{
+									continue;
+								}
+
+								arma::cx_vec rhoavg_n;
+								rhoavg_n.zeros(current.rhovec.n_elem);
+								arma::cx_vec tmp_rho = current.rhovec;
+
+								arma::cx_mat A_exp;
+								arma::sp_cx_mat A_sp;
+								bool use_krylov = (current.A_nz.n_rows > 64);
+								if (use_krylov)
+								{
+									A_sp = arma::conv_to<arma::sp_cx_mat>::from(current.A_nz);
+								}
+								else
+								{
+									A_exp = arma::expmat(current.A_nz * (*pulse)->Timestep());
+								}
+
+								for (unsigned int n = 1; n <= steps; n++)
+								{
+									arma::cx_vec out_vec_eig;
+									if (use_krylov)
+									{
+										out_vec_eig = space.KrylovExpmGeneral(A_sp, tmp_rho, (*pulse)->Timestep(), 30, A_sp.n_rows);
+									}
+									else
+									{
+										out_vec_eig = A_exp * tmp_rho;
+									}
+
+									if (integration && (Integrationwindow.compare("freeevo") != 0))
+									{
+										rhoavg_n += (*pulse)->Timestep() * (tmp_rho + out_vec_eig) / 2.0;
+									}
+
+									tmp_rho = out_vec_eig;
+									if (!rhoavg_n.is_zero(0))
+									{
+										out_vec_eig = rhoavg_n;
+									}
+									current.rhovec = out_vec_eig;
+
+									if (Timewindow.compare("freeevo") != 0)
+									{
+										if (!to_lab_and_accumulate(out_vec_eig, current.eigen_vec, current.weight, rho_avg[n]))
+										{
+											this->Log() << "Failed to transform free-evolution result back to lab frame for orientation " << grid_num << "." << std::endl;
+										}
+									}
+								}
+							}
+
+							if (Timewindow.compare("freeevo") != 0)
+							{
+								for (unsigned int n = 1; n <= steps; n++)
+								{
+									if (!this->ProjectAndPrintOutputLine(i, space, rho_avg[n], Printedtime, (*pulse)->Timestep(), n, CIDSP, this->Data(), this->Log()))
+									{
+										this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+									}
+								}
 							}
 						}
 
-					for (unsigned int n = firststep; n <= time_steps; n++)
-					{
-						if (!this->ProjectAndPrintOutputLine(i, space, rho_avg[n], Printedtime, this->timestep, n, CIDSP, this->Data(), this->Log()))
-							this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+						if (Timewindow.compare("freeevo") != 0)
+						{
+							Printedtime += timerelaxation;
+						}
 					}
 
+					if (!pulse_found)
+					{
+						this->Log() << "Pulse \"" << pulse_name << "\" from pulsesequence was not found in SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
+					}
+				}
+			}
+
+			if (Method.compare("timeinf") == 0)
+			{
+				this->Log() << "Ready to perform calculation." << std::endl;
+				this->Log() << "Method = " << Method << std::endl;
+
+				if (integration)
+				{
+					this->Log() << "Warning: steady state method (timeinf) is calculated as an inverse of the Liouvillian operator, instead of the integration on a grid."
+					            << "The integration of the pulse sequence timewindow could be added if integration = true and integrationtimeframe = pulse / full." << std::endl;
+				}
+
+				arma::cx_vec integral;
+				integral.zeros(rho0vec.n_elem);
+
+				for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+				{
+					OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+					if (!current.valid)
+					{
+						continue;
+					}
+
+					arma::cx_vec result_eig = -solve(current.A_nz, current.rhovec);
+					if (!to_lab_and_accumulate(result_eig, current.eigen_vec, current.weight, integral))
+					{
+						this->Log() << "Failed to transform NZ steady-state result back to lab frame for orientation " << grid_num << "." << std::endl;
+					}
+				}
+
+				if (Timewindow.compare("pulse") != 0)
+				{
+					if (!this->ProjectAndPrintOutputLineInf(i, space, integral, Printedtime, this->timestep, CIDSP, this->Data(), this->Log()))
+					{
+						this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+					}
+				}
+
+				this->Log() << "Done with calculation." << std::endl;
+			}
+			else if (Method.compare("timeevo") == 0)
+			{
+				if (this->totaltime != 0.0)
+				{
+					this->Log() << "Ready to perform calculation." << std::endl;
+					this->Log() << "Method = " << Method << std::endl;
+
+					int firststep = (Printedtime == 0.0) ? 0 : 1;
+					unsigned int time_steps = static_cast<unsigned int>(std::abs(this->totaltime / this->timestep));
+					std::vector<arma::cx_vec> rho_avg(time_steps + 1);
+					for (auto &v : rho_avg)
+					{
+						v.zeros(rho0vec.n_elem);
+					}
+
+					for (int grid_num = 0; grid_num < numPoints; ++grid_num)
+					{
+						OrientationState &current = orientation_states[static_cast<size_t>(grid_num)];
+						if (!current.valid)
+						{
+							continue;
+						}
+
+						arma::cx_vec rhoavg_n;
+						rhoavg_n.zeros(current.rhovec.n_elem);
+						arma::cx_vec tmp_rho = current.rhovec;
+
+						arma::cx_mat A_exp;
+						arma::sp_cx_mat A_sp;
+						bool use_krylov = (current.A_nz.n_rows > 64);
+						if (use_krylov)
+						{
+							A_sp = arma::conv_to<arma::sp_cx_mat>::from(current.A_nz);
+						}
+						else
+						{
+							A_exp = arma::expmat(current.A_nz * this->timestep);
+						}
+
+						for (unsigned int n = static_cast<unsigned int>(firststep); n <= time_steps; n++)
+						{
+							arma::cx_vec out_vec_eig;
+							if (n == 0)
+							{
+								out_vec_eig = tmp_rho;
+							}
+							else
+							{
+								if (use_krylov)
+								{
+									out_vec_eig = space.KrylovExpmGeneral(A_sp, tmp_rho, this->timestep, 30, A_sp.n_rows);
+								}
+								else
+								{
+									out_vec_eig = A_exp * tmp_rho;
+								}
+
+								if (integration && (Integrationwindow.compare("pulse") != 0))
+								{
+									rhoavg_n += this->timestep * (tmp_rho + out_vec_eig) / 2.0;
+								}
+
+								tmp_rho = out_vec_eig;
+								if (!rhoavg_n.is_zero(0))
+								{
+									out_vec_eig = rhoavg_n;
+								}
+							}
+
+							current.rhovec = out_vec_eig;
+
+							if (Timewindow.compare("pulse") != 0)
+							{
+								if (!to_lab_and_accumulate(out_vec_eig, current.eigen_vec, current.weight, rho_avg[n]))
+								{
+									this->Log() << "Failed to transform NZ time-domain result back to lab frame for orientation " << grid_num << "." << std::endl;
+								}
+							}
+						}
+					}
+
+					if (Timewindow.compare("pulse") != 0)
+					{
+						for (unsigned int n = static_cast<unsigned int>(firststep); n <= time_steps; n++)
+						{
+							if (!this->ProjectAndPrintOutputLine(i, space, rho_avg[n], Printedtime, this->timestep, n, CIDSP, this->Data(), this->Log()))
+							{
+								this->Log() << "Could not project the state vector and print the result into a file" << std::endl;
+							}
+						}
+					}
 				}
 
 				this->Log() << "Done with calculation." << std::endl;
@@ -835,9 +1298,7 @@ namespace RunSection
 			this->Log() << "\nDone with SpinSystem \"" << (*i)->Name() << "\"" << std::endl;
 		}
 
-		// Terminate the line in the data file after iteration through all spin systems
 		this->Data() << std::endl;
-
 		return true;
 	}
 

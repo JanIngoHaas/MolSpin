@@ -42,7 +42,6 @@ namespace RunSection
 		bool CreateUniformGrid(int &_Npoints, std::vector<std::tuple<double, double, double>> &_uniformGrid) const;
 		bool CreateCustomGrid(int &_Npoints, std::vector<std::tuple<double, double, double>> &_Grid) const;
 
-		arma::cx_vec KrylovPropagator(const arma::sp_cx_mat &_A, const arma::cx_vec &_rho, double _dt, int _m);
 		bool Create_A_for_current_orientation(auto &_i, SpinAPI::SpinSpace &_space, double &_theta, double &_phi, arma::sp_cx_mat &_A, std::ostream &_logstream) const;
 
 
