@@ -19,6 +19,8 @@
 #include "Pulse.h"
 #include <cmath>
 #include <iomanip> // std::setprecision
+#include <numeric>
+#include <sstream>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -35,6 +37,177 @@ namespace RunSection
 				sum += (*it) * B(it.col(), it.row());
 			}
 			return std::real(sum);
+		}
+
+		std::string TrimCopy(const std::string &value)
+		{
+			const auto begin = value.find_first_not_of(" \t\n\r");
+			if (begin == std::string::npos)
+				return std::string();
+
+			const auto end = value.find_last_not_of(" \t\n\r");
+			return value.substr(begin, end - begin + 1);
+		}
+
+		bool BuildInitialDensityMatrix(const SpinAPI::system_ptr &system,
+									   SpinAPI::SpinSpace &space,
+									   const std::shared_ptr<MSDParser::ObjectParser> &task_properties,
+									   arma::cx_mat &rho0,
+									   std::ostream &log_stream)
+		{
+			auto initial_states = system->InitialState();
+			if (initial_states.empty() && task_properties != nullptr)
+			{
+				std::string legacy_initial_state;
+				if (task_properties->Get("initialstate", legacy_initial_state))
+				{
+					log_stream << "Using legacy task-level initialstate input \"" << legacy_initial_state
+							   << "\". Prefer spin-system initialstate for new inputs." << std::endl;
+
+					std::istringstream stream(legacy_initial_state);
+					for (std::string token; std::getline(stream, token, ',');)
+					{
+						token = TrimCopy(token);
+						if (token.empty())
+							continue;
+
+						if (token == "Thermal" || token == "thermal")
+						{
+							initial_states.push_back(nullptr);
+							continue;
+						}
+
+						bool found = false;
+						auto states = system->States();
+						for (auto state = states.cbegin(); state != states.cend(); ++state)
+						{
+							if ((*state)->Name() == token)
+							{
+								initial_states.push_back(*state);
+								found = true;
+								break;
+							}
+						}
+
+						if (!found)
+						{
+							log_stream << "Failed to resolve legacy initial state \"" << token
+									   << "\" on SpinSystem \"" << system->Name() << "\"." << std::endl;
+						}
+					}
+				}
+			}
+
+			if (initial_states.empty())
+				return false;
+
+			std::vector<double> weights = system->Weights();
+			bool use_weights = (initial_states.size() > 1 && weights.size() == initial_states.size());
+			if (weights.size() > 1 && !use_weights)
+			{
+				log_stream << "Ignoring initial-state weights for SpinSystem \"" << system->Name()
+						   << "\" because the number of weights does not match the number of initial states." << std::endl;
+			}
+
+			if (use_weights)
+			{
+				const double sum_weights = std::accumulate(weights.begin(), weights.end(), 0.0);
+				if (sum_weights > 0.0)
+				{
+					for (double &weight : weights)
+						weight /= sum_weights;
+				}
+				else
+				{
+					log_stream << "Ignoring non-positive initial-state weights for SpinSystem \"" << system->Name()
+							   << "\"." << std::endl;
+					use_weights = false;
+				}
+			}
+
+			bool assigned = false;
+			for (size_t idx = 0; idx < initial_states.size(); ++idx)
+			{
+				arma::cx_mat tmp_rho0;
+				if (initial_states[idx] == nullptr)
+				{
+					auto thermal_hamiltonian_list = system->ThermalHamiltonianList();
+					double temperature = system->Temperature();
+					log_stream << "Initial state = thermal, T = " << temperature << " K." << std::endl;
+					if (!space.GetThermalState(space, temperature, thermal_hamiltonian_list, tmp_rho0))
+					{
+						log_stream << "Failed to obtain thermal initial state for SpinSystem \"" << system->Name() << "\"." << std::endl;
+						continue;
+					}
+				}
+				else
+				{
+					if (!space.GetState(initial_states[idx], tmp_rho0))
+					{
+						log_stream << "Failed to obtain projection matrix onto state \"" << initial_states[idx]->Name()
+								   << "\", initial state of SpinSystem \"" << system->Name() << "\"." << std::endl;
+						continue;
+					}
+				}
+
+				const double weight = use_weights ? weights[idx] : 1.0;
+				if (!assigned)
+				{
+					rho0 = weight * tmp_rho0;
+					assigned = true;
+				}
+				else
+				{
+					rho0 += weight * tmp_rho0;
+				}
+			}
+
+			if (!assigned)
+				return false;
+
+			const arma::cx_double rho_trace = arma::trace(rho0);
+			if (std::abs(rho_trace) == 0.0)
+				return false;
+
+			rho0 /= rho_trace;
+			return true;
+		}
+
+		arma::cx_mat FactorizeDensityMatrix(const arma::cx_mat &rho0, std::ostream &log_stream)
+		{
+			const arma::cx_mat hermitian_rho0 = 0.5 * (rho0 + rho0.st());
+			arma::vec eigenvalues;
+			arma::cx_mat eigenvectors;
+			if (!arma::eig_sym(eigenvalues, eigenvectors, hermitian_rho0))
+			{
+				log_stream << "Failed to diagonalize the initial density matrix in Hilbert space." << std::endl;
+				return arma::cx_mat();
+			}
+
+			const double max_eigenvalue = eigenvalues.is_empty() ? 0.0 : std::abs(eigenvalues.max());
+			const double tolerance = std::max(1.0e-12, 1.0e-10 * max_eigenvalue);
+			if (eigenvalues.min() < -tolerance)
+			{
+				log_stream << "Initial density matrix has significantly negative eigenvalues (" << eigenvalues.min()
+						   << "). Cannot construct Hilbert-space factorization." << std::endl;
+				return arma::cx_mat();
+			}
+
+			arma::uvec keep = arma::find(eigenvalues > tolerance);
+			if (keep.is_empty())
+			{
+				log_stream << "Initial density matrix is numerically rank-zero after factorization." << std::endl;
+				return arma::cx_mat();
+			}
+
+			arma::cx_mat B(rho0.n_rows, keep.n_elem, arma::fill::zeros);
+			for (arma::uword col = 0; col < keep.n_elem; ++col)
+			{
+				const arma::uword idx = keep(col);
+				B.col(col) = std::sqrt(eigenvalues(idx)) * eigenvectors.col(idx);
+			}
+
+			return B;
 		}
 	}
 
@@ -65,30 +238,6 @@ namespace RunSection
 		auto systems = this->SpinSystems();
 		for (auto i = systems.cbegin(); i != systems.cend(); i++) // iteration through all spin systems, in this case (or usually), this is one
 		{
-			// Count the number of nuclear spins
-			int nucspins = 0;
-			std::vector<int> SpinNumbers;
-			for (auto l = (*i)->spins_cbegin(); l != (*i)->spins_cend(); l++)
-			{
-				std::string spintype;
-				(*l)->Properties()->Get("type", spintype);
-				if (spintype != "electron")
-				{
-					nucspins += 1;
-				}
-				if (spintype == "electron")
-				{
-					// Throws an error if the spins are not spin 1/2
-					if ((*l)->Multiplicity() != 2)
-					{
-						this->Log() << "Skipping SpinSystem \"" << (*i)->Name()
-									<< "\" because electron spins must be spin 1/2 (multiplicity 2). Found multiplicity "
-									<< (*l)->Multiplicity() << "." << std::endl;
-						return 1;
-					}
-				}
-			}
-
 			this->Log() << "\nStarting with SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
 
 			// Obtain a SpinSpace to describe the system
@@ -96,107 +245,23 @@ namespace RunSection
 			space.UseSuperoperatorSpace(false);
 			space.SetReactionOperatorType(this->reactionOperators);
 
-			std::string InitialState;
-			arma::cx_mat InitialStateVector;
-			if(this->Properties()->Get("initialstate", InitialState))
+			arma::cx_mat rho0;
+			if (!BuildInitialDensityMatrix(*i, space, this->Properties(), rho0, this->Log()))
 			{
-				// Set up states for time-propagation
-				arma::cx_mat TaskInitialStateVector(4, 1);
-				std::string InitialStateLower;
-
-				// Convert the string to lowercase for case-insensitive comparison
-				InitialStateLower.resize(InitialState.size());
-				std::transform(InitialState.begin(), InitialState.end(), InitialStateLower.begin(), ::tolower);
-
-				if (InitialStateLower == "singlet")
-				{
-					arma::cx_mat SingletState(4, 1);
-					SingletState(0) = 0.0;
-					SingletState(1) = 1.0 / sqrt(2);
-					SingletState(2) = -1.0 / sqrt(2);
-					SingletState(3) = 0.0;
-					TaskInitialStateVector = SingletState;
-					this->Log() << "Singlet initial state." << std::endl;
-				}
-				else if (InitialStateLower == "tripletminus")
-				{
-					arma::cx_mat TripletMinusState(4, 1);
-					TripletMinusState(0) = 0.0;
-					TripletMinusState(1) = 0.0;
-					TripletMinusState(2) = 0.0;
-					TripletMinusState(3) = 1.0;
-					TaskInitialStateVector = TripletMinusState;
-					this->Log() << "Triplet minus initial state." << std::endl;
-				}
-				else if (InitialStateLower == "tripletzero")
-				{
-					arma::cx_mat TripletZeroState(4, 1);
-					TripletZeroState(0) = 0.0;
-					TripletZeroState(1) = 1.0 / sqrt(2);
-					TripletZeroState(2) = 1.0 / sqrt(2);
-					TripletZeroState(3) = 0.0;
-					TaskInitialStateVector = TripletZeroState;
-					this->Log() << "Triplet zero initial state." << std::endl;
-				}
-				else if (InitialStateLower == "tripletplus")
-				{
-					arma::cx_mat TripletPlusState(4, 1);
-					TripletPlusState(0) = 1.0;
-					TripletPlusState(1) = 0.0;
-					TripletPlusState(2) = 0.0;
-					TripletPlusState(3) = 0.0;
-					TaskInitialStateVector = TripletPlusState;
-					this->Log() << "Triplet plus initial state." << std::endl;
-				}
-				else
-				{
-					this->Log() << "Invalid initial state value \"" << InitialState << "\". Using Singlet state." << std::endl;
-					arma::cx_mat SingletState(4, 1);
-					SingletState(0) = 0.0;
-					SingletState(1) = 1.0 / sqrt(2);
-					SingletState(2) = -1.0 / sqrt(2);
-					SingletState(3) = 0.0;
-					TaskInitialStateVector = SingletState;
-				}
-				InitialStateVector = TaskInitialStateVector;
-			}
-			else
-			{
-				// Make sure we have an initial state
-				auto initial_states = (*i)->InitialState();
-				if (initial_states.size() < 1)
-				{
-					this->Log() << "Skipping SpinSystem \"" << (*i)->Name() << "\" as no initial state was specified." << std::endl;
-					continue;
-				}
-
-				arma::cx_vec tmp_InitialStateVector;
-
-				for (auto j = initial_states.cbegin(); j != initial_states.cend(); j++)
-				{
-					if (!space.GetStateSubSpace(*j, tmp_InitialStateVector))
-					{
-						this->Log() << "Failed to obtain projection matrix onto state \"" << (*j)->Name() << "\", initial state of SpinSystem \"" << (*i)->Name() << "\"." << std::endl;
-						continue;
-					}
-				}
-
-				InitialStateVector = arma::reshape(tmp_InitialStateVector, tmp_InitialStateVector.n_elem, 1);
+				this->Log() << "Skipping SpinSystem \"" << (*i)->Name() << "\" as no valid initial state could be constructed." << std::endl;
+				continue;
 			}
 
-			int Z = space.SpaceDimensions() / InitialStateVector.n_rows; // Size of the nuclear spin subspace
-			this->Log() << "Hilbert Space Size " << InitialStateVector.n_rows * Z << " x " << InitialStateVector.n_rows * Z << std::endl;
-			this->Log() << "Size of Nuclear Spin Subspace " << Z << std::endl;
-
-			arma::cx_mat B;
-			B.zeros(Z * InitialStateVector.n_rows, Z);
-
-			for (int it = 0; it < Z; it++)
+			arma::cx_mat Binitial = FactorizeDensityMatrix(rho0, this->Log());
+			if (Binitial.is_empty())
 			{
-				arma::colvec temp(Z);
-				temp(it) = 1;
-				B.col(it) = arma::kron(InitialStateVector, temp);
+				this->Log() << "Skipping SpinSystem \"" << (*i)->Name() << "\" because the initial density matrix could not be factorized." << std::endl;
+				continue;
 			}
+
+			const int dim = static_cast<int>(rho0.n_rows);
+			this->Log() << "Hilbert Space Size " << dim << " x " << dim << std::endl;
+			this->Log() << "Initial-state rank " << Binitial.n_cols << std::endl;
 
 			// Get Information about the polarization of choice
 			bool CIDSP = false;
@@ -328,7 +393,7 @@ namespace RunSection
 
 			// Get the Hamiltonian
 			arma::sp_cx_mat K;
-			K.zeros(InitialStateVector.n_rows * Z, InitialStateVector.n_rows * Z);
+			K.zeros(dim, dim);
 
 			for (auto j = transitions.cbegin(); j != transitions.cend(); j++)
 			{
@@ -337,9 +402,6 @@ namespace RunSection
 				space.GetState((*j)->SourceState(), P);
 				K += (*j)->Rate() / 2 * P;
 			}
-
-			arma::cx_mat Binitial = B;
-
 			SpinAPI::HilbertRelaxationCache relaxation_cache;
 			bool use_density_matrix = false;
 			for (auto j = (*i)->operators_cbegin(); j != (*i)->operators_cend(); j++)
@@ -677,7 +739,6 @@ namespace RunSection
 			arma::cx_mat rho_integrated;
 			if (method_timeinf)
 			{
-				int dim = InitialStateVector.n_rows * Z;
 				rho_integrated.zeros(dim, dim);
 			}
 
@@ -710,7 +771,6 @@ namespace RunSection
 			std::vector<arma::cx_mat> rho_integrated_partial;
 			if (method_timeinf)
 			{
-				int dim = InitialStateVector.n_rows * Z;
 				rho_integrated_partial.resize(nthreads);
 				for (auto &m : rho_integrated_partial)
 				{
@@ -721,7 +781,6 @@ namespace RunSection
 			arma::cx_mat Iden_dense;
 			if (method_timeinf)
 			{
-				int dim = InitialStateVector.n_rows * Z;
 				Iden_dense = arma::eye<arma::cx_mat>(dim, dim);
 			}
 
@@ -796,7 +855,7 @@ namespace RunSection
 
 				if (use_density_matrix)
 				{
-					arma::cx_mat rho = Binitial * Binitial.st();
+					arma::cx_mat rho = rho0;
 					int dim = static_cast<int>(rho.n_rows);
 
 					arma::cx_mat work_left(dim, dim, arma::fill::zeros);
@@ -832,8 +891,8 @@ namespace RunSection
 					auto record_expectation_rho = [&](arma::mat &target, size_t row_index, const arma::cx_mat &state) {
 						for (int idx = 0; idx < projection_counter; ++idx)
 						{
-							double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], state) / Z)
-														: (std::real(arma::trace(OperatorsDense[idx] * state)) / Z);
+							double val = use_sparse_ops ? TraceSparseDense(OperatorsSparse[idx], state)
+														: std::real(arma::trace(OperatorsDense[idx] * state));
 							target(row_index, idx) = val;
 						}
 					};
@@ -1025,16 +1084,17 @@ namespace RunSection
 											continue;
 										}
 
-										double pulse_factor = std::cos((*pulse)->Frequency() * pulse_dt);
 										unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / pulse_dt));
 										if (relax_use_split_expm)
 										{
-											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
-											arma::cx_mat U_half;
-											arma::cx_mat U_half_st;
-											build_unitary_half(H_pulse_dense, pulse_dt, U_half, U_half_st);
 											for (unsigned int n = 1; n <= steps; ++n)
 											{
+												double t = n * pulse_dt;
+												double pulse_factor = std::cos((*pulse)->Frequency() * t);
+												arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
+												arma::cx_mat U_half;
+												arma::cx_mat U_half_st;
+												build_unitary_half(H_pulse_dense, pulse_dt, U_half, U_half_st);
 												split_step(rho, U_half, U_half_st, pulse_dt);
 
 												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
@@ -1046,9 +1106,11 @@ namespace RunSection
 										}
 										else if (use_dense_H)
 										{
-											arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
 											for (unsigned int n = 1; n <= steps; ++n)
 											{
+												double t = n * pulse_dt;
+												double pulse_factor = std::cos((*pulse)->Frequency() * t);
+												arma::cx_mat H_pulse_dense = H_dense + arma::cx_mat(pulse_operator) * pulse_factor;
 												rk4_step(rho, H, &H_pulse_dense, pulse_dt);
 
 												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
@@ -1060,9 +1122,12 @@ namespace RunSection
 										}
 										else
 										{
-											arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
 											for (unsigned int n = 1; n <= steps; ++n)
 											{
+												double t = n * pulse_dt;
+												double t_mid = t + 0.5 * pulse_dt;
+												double pulse_factor = std::cos((*pulse)->Frequency() * t_mid);
+												arma::sp_cx_mat H_pulse = H + pulse_operator * pulse_factor;
 												rk4_step(rho, H_pulse, nullptr, pulse_dt);
 
 												if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
@@ -1198,7 +1263,7 @@ namespace RunSection
 							OB = OperatorsDense[idx] * state;
 						}
 						double abs_trace = std::real(arma::accu(state_conj % OB));
-						target(row_index, idx) = abs_trace / Z;
+						target(row_index, idx) = abs_trace;
 					}
 				};
 
@@ -1295,21 +1360,17 @@ namespace RunSection
 										continue;
 									}
 
-									// Create array containing a propagator and the current state of each system
-									std::pair<arma::sp_cx_mat, arma::cx_mat> G;
-
-									// Get the propagator and put it into the array together with the initial state
-									arma::sp_cx_mat A_sp = arma::conv_to<arma::sp_cx_mat>::from(arma::expmat(arma::conv_to<arma::cx_mat>::from((A + (arma::cx_double(0.0, -1.0) * pulse_operator * std::cos((*pulse)->Frequency() * (*pulse)->Timestep()))) * (*pulse)->Timestep())));
-									G = std::pair<arma::sp_cx_mat, arma::cx_mat>(A_sp, B);
-
 									unsigned int steps = static_cast<unsigned int>(std::abs((*pulse)->Pulsetime() / (*pulse)->Timestep()));
 									for (unsigned int n = 1; n <= steps; n++)
 									{
-										// Take a step, "first" is propagator and "second" is current state
-										B = G.first * G.second;
+										double t = n * (*pulse)->Timestep();
+										double pulse_factor = std::cos((*pulse)->Frequency() * t);
+										arma::sp_cx_mat A_sp = arma::conv_to<arma::sp_cx_mat>::from(
+											arma::expmat(
+												arma::conv_to<arma::cx_mat>::from(
+													(A + (arma::cx_double(0.0, -1.0) * pulse_operator * pulse_factor)) * (*pulse)->Timestep())));
 
-										// Get the new current state density vector
-										G.second = B;
+										B = A_sp * B;
 
 										if (has_pulse_output && pulse_step_index < ExptValuesPulseOrientation.n_rows)
 										{
@@ -1385,10 +1446,10 @@ namespace RunSection
 							{
 								OB = OperatorsDense[idx] * B;
 							}
-							double abs_trace = std::real(arma::accu(Bconj % OB));
-							double expected_value = abs_trace / Z;
-							ExptValuesOrientation(k, idx) = expected_value;
-						}
+								double abs_trace = std::real(arma::accu(Bconj % OB));
+								double expected_value = abs_trace;
+								ExptValuesOrientation(k, idx) = expected_value;
+							}
 
 						// Update B using the Higham propagator
 						B = space_thread.HighamProp(H_prop, B, -arma::cx_double(0.0, 1.0) * dt, precision, M);
@@ -1398,17 +1459,17 @@ namespace RunSection
 				{
 					arma::sp_cx_mat H_prop = H - arma::cx_double(0.0, 1.0) * K;
 
-					for (int itr = 0; itr < Z; itr++)
+					for (arma::uword itr = 0; itr < B.n_cols; itr++)
 					{
 						arma::cx_vec prop_state = B.col(itr);
 
 						// Calculate the expected values for each transition operator
 						for (int idx = 0; idx < projection_counter; idx++)
 						{
-							double result = std::abs(arma::cdot(prop_state, Operators[idx] * prop_state));
+							double result = std::real(arma::cdot(prop_state, Operators[idx] * prop_state));
 							ExptValuesOrientation(0, idx) += result;
 						}
-						prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, InitialStateVector.n_rows * Z);
+						prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, dim);
 
 						int k = 1;
 
@@ -1417,16 +1478,14 @@ namespace RunSection
 							// Calculate the expected values for each transition operator
 							for (int idx = 0; idx < projection_counter; idx++)
 							{
-								double result = std::abs(arma::cdot(prop_state, Operators[idx] * prop_state));
+								double result = std::real(arma::cdot(prop_state, Operators[idx] * prop_state));
 								ExptValuesOrientation(k, idx) += result;
 							}
 							// Update the state using the shared Krylov propagator.
-							prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, InitialStateVector.n_rows * Z);
+							prop_state = space_thread.KrylovExpmGeneral(H_prop, prop_state, dt, krylovsize, dim);
 							k++;
 						}
 					}
-
-					ExptValuesOrientation /= Z;
 				}
 				else if (method_timeevo)
 				{
@@ -1458,7 +1517,7 @@ namespace RunSection
 								OB = OperatorsDense[idx] * B;
 							}
 							double abs_trace = std::real(arma::accu(Bconj % OB));
-							double expected_value = abs_trace / Z;
+							double expected_value = abs_trace;
 							ExptValuesOrientation(k, idx) = expected_value;
 						}
 
@@ -1580,8 +1639,8 @@ namespace RunSection
 
 					for (int idx = 0; idx < projection_counter; idx++)
 					{
-						double val = use_sparse_ops ? (TraceSparseDense(OperatorsSparse[idx], rho_integrated) / Z)
-													: (std::real(arma::trace(OperatorsDense[idx] * rho_integrated)) / Z);
+						double val = use_sparse_ops ? TraceSparseDense(OperatorsSparse[idx], rho_integrated)
+													: std::real(arma::trace(OperatorsDense[idx] * rho_integrated));
 						this->Data() << std::setprecision(12) << val << " ";
 					}
 					this->Data() << std::endl;

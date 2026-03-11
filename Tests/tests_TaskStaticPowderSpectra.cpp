@@ -28,6 +28,13 @@ namespace
 		std::shared_ptr<SpinAPI::State> state_identity;
 	};
 
+	struct OneElectronSystem
+	{
+		std::shared_ptr<SpinAPI::SpinSystem> spinsys;
+		std::vector<std::shared_ptr<SpinAPI::SpinSystem>> spinsystems;
+		std::shared_ptr<SpinAPI::State> state_up;
+	};
+
 	TwoElectronSystem BuildTwoElectronSystem(double _bx, double _by, double _bz, bool _add_transition, double _rate)
 	{
 		TwoElectronSystem system;
@@ -75,6 +82,53 @@ namespace
 		ok &= _system.state_identity->ParseFromSystem(*_system.spinsys);
 		ok &= (_system.spinsys->ValidateTransitions(_system.spinsystems).size() == 0);
 		return ok;
+	}
+
+	OneElectronSystem BuildOneElectronSystem(
+		const std::string &_spin_system_properties = "initialstate=Up;",
+		const std::string &_pulse_name = "cw",
+		const std::string &_pulse_properties =
+			"type=LongPulseStaticField;field=0.0002 0 0;pulsetime=2.0;timestep=0.1;group=E;"
+			"prefactorlist=1,1,1;commonprefactorlist=true;ignoretensorslist=true;")
+	{
+		OneElectronSystem system;
+
+		auto spin = std::make_shared<SpinAPI::Spin>("E", "type=electron;spin=1/2;tensor=matrix(\"2.0 0 0; 0 2.0 0; 0 0 2.4\");");
+		auto zeeman = std::make_shared<SpinAPI::Interaction>(
+			"zeeman",
+			"type=zeeman;spins=E;field=0 0 -0.004;ignoretensors=false;commonprefactor=true;prefactor=1.0;");
+		auto state_up = std::make_shared<SpinAPI::State>("Up", "spin(E)=|1/2>;");
+		auto pulse = std::make_shared<SpinAPI::Pulse>(_pulse_name, _pulse_properties);
+
+		auto spinsys = std::make_shared<SpinAPI::SpinSystem>("System");
+		spinsys->Add(spin);
+		spinsys->Add(zeeman);
+		spinsys->Add(state_up);
+		spinsys->Add(pulse);
+		spinsys->ValidateInteractions();
+
+		auto spinsysParser = std::make_shared<MSDParser::ObjectParser>("spinsyssettings", _spin_system_properties);
+		spinsys->SetProperties(spinsysParser);
+
+		system.spinsys = spinsys;
+		system.spinsystems.push_back(spinsys);
+		system.state_up = state_up;
+		return system;
+	}
+
+	OneElectronSystem BuildOneElectronThermalSystem()
+	{
+		return BuildOneElectronSystem("initialstate=thermal;temperature=280.0;thermalhamiltonian=zeeman;");
+	}
+
+	OneElectronSystem BuildOneElectronThermalSystemWithPulse(const std::string &_pulse_name, const std::string &_pulse_properties)
+	{
+		return BuildOneElectronSystem("initialstate=thermal;temperature=280.0;thermalhamiltonian=zeeman;", _pulse_name, _pulse_properties);
+	}
+
+	bool PrepareSystem(const OneElectronSystem &_system)
+	{
+		return _system.state_up->ParseFromSystem(*_system.spinsys);
 	}
 
 	bool RunPowderTask(const std::shared_ptr<SpinAPI::SpinSystem> &_spinsys, const std::string &_task_type, const std::string &_props, std::string &_data)
@@ -238,6 +292,20 @@ namespace
 		}
 
 		return true;
+	}
+
+	void TrimDuplicateTailRow(std::vector<std::vector<double>> &_rows, double _tol)
+	{
+		if (_rows.size() < 2)
+			return;
+		if (_rows[_rows.size() - 1].size() != _rows[_rows.size() - 2].size())
+			return;
+		for (size_t i = 0; i < _rows.back().size(); ++i)
+		{
+			if (!equal_double(_rows[_rows.size() - 1][i], _rows[_rows.size() - 2][i], _tol))
+				return;
+		}
+		_rows.pop_back();
 	}
 }
 
@@ -417,6 +485,172 @@ bool test_task_staticpowder_timeevo_relaxation_hs_ss_agree()
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// Time-evo powder CW: HS direct spectra should also work for a non-RP one-electron system.
+bool test_task_staticpowder_timeevo_oneelectron_hs_ss_agree()
+{
+	auto system = BuildOneElectronSystem();
+	bool ok = PrepareSystem(system);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=E;powdersamplingpoints=5;"
+						"hamiltonianh0list=zeeman;printtimeframe=pulse;integrationtimeframe=pulse;"
+						"pulsesequence=[\"cw 0\"];totaltime=0;timestep=0.1;";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() == 3);
+	ok &= (hs_rows.front().size() == 3);
+	ok &= RowsClose(ss_rows, hs_rows, 1e-5);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Time-evo: HS and SS should agree for a one-electron thermal powder spectrum.
+bool test_task_staticpowder_timeevo_oneelectron_thermal_hs_ss_agree()
+{
+	auto system = BuildOneElectronThermalSystem();
+	bool ok = PrepareSystem(system);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=E;powdersamplingpoints=7;"
+						"hamiltonianh0list=zeeman;totaltime=0.95;timestep=0.1;";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() == 3);
+	ok &= (hs_rows.front().size() == 3);
+	ok &= RowsClose(ss_rows, hs_rows, 1e-10);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Pulse time-evo: HS and SS should agree for a one-electron thermal powder spectrum.
+bool test_task_staticpowder_pulse_oneelectron_thermal_hs_ss_agree()
+{
+	auto system = BuildOneElectronThermalSystem();
+	bool ok = PrepareSystem(system);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=E;powdersamplingpoints=7;"
+						"hamiltonianh0list=zeeman;totaltime=0;timestep=0.1;printtimeframe=pulse;"
+						"integrationtimeframe=pulse;pulsesequence=[\"cw 0\"];";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() == 3);
+	ok &= (hs_rows.front().size() == 3);
+	ok &= RowsClose(ss_rows, hs_rows, 1e-10);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Instant pulse + free evolution: HS and SS should agree for a one-electron thermal powder spectrum.
+bool test_task_staticpowder_instantpulse_oneelectron_thermal_hs_ss_agree()
+{
+	auto system = BuildOneElectronThermalSystemWithPulse(
+		"inst",
+		"type=InstantPulse;angle=90;rotationaxis=1 0 0;group=E;");
+	bool ok = PrepareSystem(system);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=E;powdersamplingpoints=7;"
+						"hamiltonianh0list=zeeman;totaltime=0;timestep=0.1;printtimeframe=full;"
+						"integrationtimeframe=full;pulsesequence=[\"inst 1.0\"];";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	TrimDuplicateTailRow(hs_rows, 1e-12);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() == 3);
+	ok &= (hs_rows.front().size() == 3);
+	ok &= RowsClose(ss_rows, hs_rows, 1e-10);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Long pulse: HS and SS should agree for a one-electron thermal powder spectrum.
+bool test_task_staticpowder_longpulse_oneelectron_thermal_hs_ss_agree()
+{
+	auto system = BuildOneElectronThermalSystemWithPulse(
+		"lp",
+		"type=LongPulse;field=0.0002 0 0;frequency=2.5;pulsetime=2.0;timestep=0.1;group=E;"
+		"prefactorlist=1,1,1;commonprefactorlist=true;ignoretensorslist=true;");
+	bool ok = PrepareSystem(system);
+
+	std::string ss_data;
+	std::string hs_data;
+	std::string props = "method=timeevo;integration=false;cidsp=false;spinlist=E;powdersamplingpoints=7;"
+						"hamiltonianh0list=zeeman;totaltime=0;timestep=0.1;printtimeframe=pulse;"
+						"integrationtimeframe=pulse;pulsesequence=[\"lp 0\"];";
+
+	ok &= RunPowderTask(system.spinsys, "staticss-powderspectra", props, ss_data);
+	ok &= RunPowderTask(system.spinsys, "statichs-direct-spectra", props + "propagationmethod=normal;", hs_data);
+
+	std::vector<std::vector<double>> ss_rows;
+	std::vector<std::vector<double>> hs_rows;
+	ok &= ParseDataRows(ss_data, ss_rows);
+	ok &= ParseDataRows(hs_data, hs_rows);
+
+	if (ss_rows.empty() || hs_rows.empty())
+		return false;
+
+	ok &= (ss_rows.size() == hs_rows.size());
+	ok &= (ss_rows.front().size() == 3);
+	ok &= (hs_rows.front().size() == 3);
+	ok &= RowsClose(ss_rows, hs_rows, 1e-10);
+
+	return ok;
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // Add all the test cases
 void AddTaskStaticPowderSpectraTests(std::vector<test_case> &_cases)
 {
@@ -425,4 +659,9 @@ void AddTaskStaticPowderSpectraTests(std::vector<test_case> &_cases)
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo integration", test_task_staticpowder_timeevo_integration_linear));
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo SS/HS agree", test_task_staticpowder_timeevo_ss_hs_agree));
 	_cases.push_back(test_case("Task StaticPowderSpectra timeevo relaxation HS/SS agree", test_task_staticpowder_timeevo_relaxation_hs_ss_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra timeevo one-electron HS/SS agree", test_task_staticpowder_timeevo_oneelectron_hs_ss_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra timeevo one-electron thermal HS/SS agree", test_task_staticpowder_timeevo_oneelectron_thermal_hs_ss_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra pulse one-electron thermal HS/SS agree", test_task_staticpowder_pulse_oneelectron_thermal_hs_ss_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra instant pulse one-electron thermal HS/SS agree", test_task_staticpowder_instantpulse_oneelectron_thermal_hs_ss_agree));
+	_cases.push_back(test_case("Task StaticPowderSpectra long pulse one-electron thermal HS/SS agree", test_task_staticpowder_longpulse_oneelectron_thermal_hs_ss_agree));
 }
