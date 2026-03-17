@@ -299,10 +299,10 @@ namespace RunSection
 					T += arma::abs(G.get()[j]) % F;
 				}
 
-				double yield = std::sqrt(2.0 * M_PI) / std::abs(arma::trace(stateProjections[*s]) * static_cast<double>(steps * steps)) * arma::accu(T);
+				double quantumYield = std::sqrt(2.0 * M_PI) / std::abs(arma::trace(stateProjections[*s]) * static_cast<double>(steps * steps)) * arma::accu(T);
 
-				this->Log() << "Calculated quantum yield of " << yield << " for state " << (*s)->Name() << "." << std::endl;
-				this->Data() << yield << " ";
+				this->Log() << "Calculated quantum yield of " << quantumYield << " for state " << (*s)->Name() << "." << std::endl;
+				this->Data() << quantumYield << " ";
 			}
 
 			this->Log() << "\nDone with SpinSystem \"" << (*i)->Name() << "\"" << std::endl;

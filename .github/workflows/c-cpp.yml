@@ -91,14 +91,14 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          cmake -S . -B build `
+          cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" `
             -DMOLSPIN_ENABLE_NATIVE_OPTIMIZATIONS=OFF
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --parallel
 
       - name: Package Unix artifact
         if: matrix.platform != 'windows'
@@ -113,11 +113,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
-          $exe = Get-ChildItem -Path build -Recurse -Filter molspin.exe | Select-Object -First 1
-          if (-not $exe) {
-            throw "molspin.exe not found in build output."
+          $exe = "build/molspin.exe"
+          if (-not (Test-Path $exe)) {
+            throw "molspin.exe not found at $exe."
           }
-          Copy-Item $exe.FullName package/molspin.exe
+          Copy-Item $exe package/molspin.exe
           Copy-Item README.md package/README.md
           Compress-Archive -Path package/* -DestinationPath "${{ matrix.artifact }}" -Force
 

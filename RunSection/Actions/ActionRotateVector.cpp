@@ -8,6 +8,11 @@
 #include "ActionRotateVector.h"
 #include "ObjectParser.h"
 
+namespace
+{
+	constexpr double kPi = 3.14159265358979323846;
+}
+
 namespace RunSection
 {
 	// -----------------------------------------------------
@@ -51,7 +56,7 @@ namespace RunSection
 		double angle = atan2(ref2Proj, ref1Proj);
 
 		// Do the rotation
-		angle += this->Value() / 180.0 * M_PI;
+		angle += this->Value() / 180.0 * kPi;
 
 		// Get the new vector
 		vec = planeLength * (this->refAxis1 * cos(angle) + this->refAxis2 * sin(angle)) + this->axis * axisProj;

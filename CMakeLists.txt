@@ -153,7 +153,7 @@ target_include_directories(molspin_core
 
 if (MSVC)
     target_compile_options(molspin_core PRIVATE /O2 /W4 /EHsc /bigobj)
-    target_compile_definitions(molspin_core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX ARMA_DONT_PRINT_FAST_MATH_WARNING)
+    target_compile_definitions(molspin_core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX _USE_MATH_DEFINES ARMA_DONT_PRINT_FAST_MATH_WARNING)
 else()
     target_compile_options(molspin_core PRIVATE -O3 -g -Wall)
     target_compile_definitions(molspin_core PRIVATE ARMA_DONT_PRINT_FAST_MATH_WARNING)
