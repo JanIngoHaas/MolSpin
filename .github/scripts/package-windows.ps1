@@ -19,7 +19,7 @@ if (-not (Test-Path $exe)) {
 Copy-Item $exe package\molspin.exe
 Copy-Item README.md package\README.md
 
-$dllSource = Join-Path $env:VCPKG_ROOT "installed/$Triplet/bin"
+$dllSource = Join-Path -Path $env:VCPKG_ROOT -ChildPath "installed/$Triplet/bin"
 if (Test-Path $dllSource) {
   Get-ChildItem -Path $dllSource -File -Filter *.dll | ForEach-Object {
     Copy-Item $_.FullName package\
@@ -27,8 +27,8 @@ if (Test-Path $dllSource) {
 }
 
 $licenseRoots = @(
-  Join-Path $env:VCPKG_ROOT "installed/$Triplet/share",
-  Join-Path $env:VCPKG_ROOT "packages"
+  (Join-Path -Path $env:VCPKG_ROOT -ChildPath "installed/$Triplet/share"),
+  (Join-Path -Path $env:VCPKG_ROOT -ChildPath "packages")
 )
 
 $copied = @{}
@@ -44,7 +44,7 @@ foreach ($root in $licenseRoots) {
       $safeParent = if ($relativeParent) { $relativeParent -replace '[\\/:*?"<>|]', '_' } else { "root" }
       $destName = "$safeParent-$($_.Name)"
       if (-not $copied.ContainsKey($destName)) {
-        Copy-Item $_.FullName (Join-Path package\LICENSES $destName) -ErrorAction SilentlyContinue
+        Copy-Item $_.FullName (Join-Path -Path 'package\LICENSES' -ChildPath $destName) -ErrorAction SilentlyContinue
         $copied[$destName] = $true
       }
     }
