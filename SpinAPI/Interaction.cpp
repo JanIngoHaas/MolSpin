@@ -19,7 +19,7 @@ namespace SpinAPI
 {
 	namespace
 	{
-		constexpr double kInversePi = 1.0 / arma::datum::pi;
+		const double kInversePi = 1.0 / arma::datum::pi;
 	}
 
 	// -----------------------------------------------------
