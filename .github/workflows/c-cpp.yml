@@ -120,18 +120,18 @@ jobs:
       - name: Package Linux artifact
         if: matrix.platform == 'linux'
         run: |
-          ./.github/scripts/package-linux.sh "${{ matrix.artifact }}"
+          bash ./.github/scripts/package-linux.sh "${{ matrix.artifact }}"
 
       - name: Package macOS artifact
         if: matrix.platform == 'macos'
         run: |
-          ./.github/scripts/package-macos.sh "${{ matrix.artifact }}"
+          bash ./.github/scripts/package-macos.sh "${{ matrix.artifact }}"
 
       - name: Package Windows artifact
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          .github/scripts/package-windows.ps1 -Artifact "${{ matrix.artifact }}" -Triplet "${{ matrix.triplet }}"
+          & ./.github/scripts/package-windows.ps1 -Artifact "${{ matrix.artifact }}" -Triplet "${{ matrix.triplet }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
