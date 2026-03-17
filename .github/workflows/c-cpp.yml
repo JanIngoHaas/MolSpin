@@ -31,7 +31,7 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             platform: windows
-            triplet: x64-windows-clangcl
+            triplet: x64-windows
             artifact: molspin-windows-x64.zip
 
     steps:
