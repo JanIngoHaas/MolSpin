@@ -18,17 +18,14 @@
 #include <fstream>
 #include <cstdlib>
 #include <thread>
-#include <unistd.h>
+#include <omp.h>
 
 #define EMERGENCY_MEMORY_ALLOCATION_SIZE 16384
 
 //////////////////////////////////////////////////////////////////////////////
-// #ifdef USE_OPENBLAS
+#ifdef MOLSPIN_HAS_OPENBLAS
 extern "C" void openblas_set_num_threads(int);
-// #endif
-// #ifdef USE_OPENMP
-extern "C" void omp_set_num_threads(int);
-// #endif
+#endif
 //////////////////////////////////////////////////////////////////////////////
 namespace
 {
@@ -479,8 +476,12 @@ int main(int argc, char **argv)
 		setenv("OMP_NUM_THREADS", ompThreadsStr.c_str(), 1);
 		setenv("OPENBLAS_NUM_THREADS", blasThreadsStr.c_str(), 1);
 
+#ifdef MOLSPIN_HAS_OPENBLAS
 		openblas_set_num_threads(blasThreads);
+#endif
+#ifdef _OPENMP
 		omp_set_num_threads(ompThreads);
+#endif
 
 		std::cout << "# - Thread configuration: OMP=" << ompThreads << ", OpenBLAS=" << blasThreads << "." << std::endl;
 		if (ompThreads > 1 && blasThreads > 1)

@@ -10,9 +10,7 @@
 #include "Utility.h"
 #include <random>
 #include <thread>
-#ifdef _OPENMP
 #include <omp.h>
-#endif
 
 namespace RunSection
 {

@@ -21,9 +21,7 @@
 #include <iomanip> // std::setprecision
 #include <numeric>
 #include <sstream>
-#ifdef _OPENMP
 #include <omp.h>
-#endif
 
 namespace RunSection
 {

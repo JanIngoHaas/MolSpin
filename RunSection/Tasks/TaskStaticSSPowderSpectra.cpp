@@ -1261,7 +1261,7 @@ namespace RunSection
 		return ReturnVec;
 	}
 
-	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLine(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLine(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
@@ -1377,7 +1377,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLine(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, arma::sp_cx_mat &_eigen_vec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLine(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, arma::sp_cx_mat &_eigen_vec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
@@ -1501,7 +1501,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLineInf(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLineInf(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
@@ -1613,7 +1613,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLineInf(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, arma::sp_cx_mat &_eigen_vec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectra::ProjectAndPrintOutputLineInf(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, arma::sp_cx_mat &_eigen_vec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
@@ -1808,7 +1808,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectra::Create_A_for_current_orientation(auto &_i, SpinAPI::SpinSpace &_space, double &_theta, double &_phi, arma::sp_cx_mat &_A, std::ostream &_logstream) const
+	bool TaskStaticSSPowderSpectra::Create_A_for_current_orientation(SystemIterator &_i, SpinAPI::SpinSpace &_space, double &_theta, double &_phi, arma::sp_cx_mat &_A, std::ostream &_logstream) const
 	{
 		// Create rotation matrix
 		arma::mat Rot_mat;

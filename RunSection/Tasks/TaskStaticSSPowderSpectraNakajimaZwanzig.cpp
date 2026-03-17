@@ -32,7 +32,7 @@ namespace RunSection
 	{
 	}
 
-	bool TaskStaticSSPowderSpectraNakajimaZwanzig::BuildNakajimaZwanzigLiouvillian(auto &_i, SpinAPI::SpinSpace &_space, const arma::cx_mat &_H, arma::cx_mat &_A, arma::cx_mat &_eigenvec)
+	bool TaskStaticSSPowderSpectraNakajimaZwanzig::BuildNakajimaZwanzigLiouvillian(SystemIterator &_i, SpinAPI::SpinSpace &_space, const arma::cx_mat &_H, arma::cx_mat &_A, arma::cx_mat &_eigenvec)
 	{
 		_space.UseSuperoperatorSpace(false);
 
@@ -492,7 +492,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ConvertSuperspaceToLab(auto &_space, const arma::cx_vec &_rho_vec_eig, const arma::cx_mat &_eigenvec, arma::cx_vec &_rho_vec_lab)
+	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ConvertSuperspaceToLab(SpinAPI::SpinSpace &_space, const arma::cx_vec &_rho_vec_eig, const arma::cx_mat &_eigenvec, arma::cx_vec &_rho_vec_lab)
 	{
 		arma::cx_mat rho_eig;
 		if (!_space.OperatorFromSuperspace(_rho_vec_eig, rho_eig))
@@ -1435,7 +1435,7 @@ namespace RunSection
 		return ReturnVec;
 	}
 
-	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ProjectAndPrintOutputLine(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ProjectAndPrintOutputLine(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, unsigned int &_n, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
@@ -1551,7 +1551,7 @@ namespace RunSection
 		return true;
 	}
 
-	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ProjectAndPrintOutputLineInf(auto &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
+	bool TaskStaticSSPowderSpectraNakajimaZwanzig::ProjectAndPrintOutputLineInf(SystemIterator &_i, SpinAPI::SpinSpace &_space, arma::cx_vec &_rhovec, double &_printedtime, double _timestep, bool &_cidsp, std::ostream &_datastream, std::ostream &_logstream)
 	{
 		arma::cx_mat rho0;
 
