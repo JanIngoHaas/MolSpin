@@ -6,7 +6,9 @@
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include "TaskStaticHSDirectSpectra.h"
 #include "Transition.h"
 #include "Operator.h"
@@ -800,8 +802,12 @@ namespace RunSection
 				spaces[t] = base_space;
 			}
 
+			if (grid_size > static_cast<size_t>(std::numeric_limits<int>::max()))
+				throw std::runtime_error("Too many grid points for OpenMP loop indexing.");
+
+			const int omp_grid_size = static_cast<int>(grid_size);
 #pragma omp parallel for schedule(static) if (grid_size > 1)
-			for (size_t grid_num = 0; grid_num < grid_size; ++grid_num)
+			for (int grid_num = 0; grid_num < omp_grid_size; ++grid_num)
 			{
 				int tid = 0;
 #ifdef _OPENMP
