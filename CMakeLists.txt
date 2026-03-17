@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(MolSpin LANGUAGES CXX)
 
+include(CTest)
+
 option(MOLSPIN_ENABLE_NATIVE_OPTIMIZATIONS "Enable non-portable CPU-specific optimizations." OFF)
 option(MOLSPIN_ENABLE_UNROLL_LOOPS "Enable loop unrolling compiler hints when supported." ON)
 
@@ -192,3 +194,4 @@ target_link_libraries(molspin PRIVATE molspin_core)
 # Unit tests
 add_executable(molspintest ${SOURCES_TESTS})
 target_link_libraries(molspintest PRIVATE molspin_core)
+add_test(NAME molspintest COMMAND molspintest)

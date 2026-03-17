@@ -38,6 +38,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up MSVC environment
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -89,6 +93,9 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure --parallel
 
       - name: Package Unix artifact
         if: matrix.platform != 'windows'
