@@ -1763,7 +1763,7 @@ namespace RunSection
 
 		_uniformGrid.resize(_Npoints);
 
-		const double golden = M_PI * (1.0 + std::sqrt(5.0)); // not standart golden angle
+		const double golden = arma::datum::pi * (1.0 + std::sqrt(5.0)); // not standart golden angle
 
 		for (int i = 0; i < _Npoints; ++i)
 		{
@@ -1771,7 +1771,7 @@ namespace RunSection
 
 			theta[i] = std::acos(1.0 - index / _Npoints);		  // hemisphere
 			phi[i] = golden * index;							  // hemisphere
-			weight[i] = std::sin(theta[i]) * 2 * M_PI / _Npoints; // 2 * pi for hemisphere
+			weight[i] = std::sin(theta[i]) * 2 * arma::datum::pi / _Npoints; // 2 * pi for hemisphere
 			_uniformGrid[i] = {theta[i], phi[i], weight[i]};
 		}
 
@@ -1794,12 +1794,12 @@ namespace RunSection
 
 			for (int j = 0; j < _Npoints; ++j)
 			{
-				double ph = (j + 0.5) * (M_PI / 2.0) / _Npoints; // uniform φ
+				double ph = (j + 0.5) * (arma::datum::pi / 2.0) / _Npoints; // uniform φ
 
 				theta[idx] = th;
 				phi[idx] = ph;
 
-				weight[idx] = (M_PI / 2.0 / _Npoints) * (1.0 / _Npoints); // Δφ * Δ(cosθ)
+				weight[idx] = (arma::datum::pi / 2.0 / _Npoints) * (1.0 / _Npoints); // Δφ * Δ(cosθ)
 				_Grid[idx] = {theta[idx], phi[idx], weight[idx]};
 				idx++;
 			}
