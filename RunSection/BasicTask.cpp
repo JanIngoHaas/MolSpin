@@ -10,7 +10,9 @@
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include "ObjectParser.h"
 #include "RunSection.h"
 #include "BasicTask.h"
@@ -311,8 +313,12 @@ namespace RunSection
 		this->Log() << "Ready to perform calculation." << std::endl;
 		
 		//#pragma omp parallel for
+		if (As.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+			throw std::runtime_error("Too many samples for OpenMP loop indexing.");
+
+		const int sample_count = static_cast<int>(As.size());
 		#pragma omp parallel for
-		for (unsigned int i = 0; i < As.size(); i++)
+		for (int i = 0; i < sample_count; ++i)
 		{
 			arma::cx_vec result = -1 * solve(arma::conv_to<arma::cx_mat>::from(As[i]), rho0vec);
 			std::cout << "Sample " << i << " trace: " << arma::trace(arma::reshape(result, std::sqrt(result.n_rows), std::sqrt(result.n_rows))) << std::endl;
