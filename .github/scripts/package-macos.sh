@@ -54,7 +54,7 @@ resolve_dep_path() {
 
 bundle_deps() {
   local target="$1"
-  local dep raw_dep dep_path
+  local dep raw_dep dep_path bundled_dep_path
   while IFS= read -r raw_dep; do
     [[ -z "$raw_dep" ]] && continue
     dep_path="$(resolve_dep_path "$raw_dep" || true)"
@@ -64,9 +64,17 @@ bundle_deps() {
     fi
     printf '%s\n' "$dep_path" >> "$seen_deps_file"
     should_bundle_dep "$dep_path" || continue
-    cp "$dep_path" "package/lib/$(basename "$dep_path")"
+    bundled_dep_path="package/lib/$(basename "$dep_path")"
+    if [[ ! -f "$bundled_dep_path" ]]; then
+      cp "$dep_path" "$bundled_dep_path"
+    fi
     bundle_deps "$dep_path"
   done < <(otool -L "$target" | sed '1d' | awk '{print $1}')
+}
+
+has_loader_rpath() {
+  local binary="$1"
+  otool -l "$binary" | grep -Fq 'path @loader_path '
 }
 
 bundle_deps package/molspin
@@ -75,10 +83,15 @@ for dep in package/lib/*; do
   [[ -f "$dep" ]] || continue
   chmod u+w "$dep"
   install_name_tool -id "@rpath/$(basename "$dep")" "$dep"
-  install_name_tool -add_rpath "@loader_path" "$dep"
+  if ! has_loader_rpath "$dep"; then
+    install_name_tool -add_rpath "@loader_path" "$dep"
+  fi
 done
 
 chmod u+w package/molspin
+if ! otool -l package/molspin | grep -Fq 'path @executable_path/lib '; then
+  install_name_tool -add_rpath "@executable_path/lib" package/molspin
+fi
 
 rewrite_deps() {
   local binary="$1"

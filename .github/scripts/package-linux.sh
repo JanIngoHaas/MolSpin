@@ -46,6 +46,8 @@ bundle_deps() {
 
 bundle_deps package/molspin
 
+patchelf --set-rpath '$ORIGIN/lib' package/molspin
+
 while IFS= read -r bundled_lib; do
   [[ -f "$bundled_lib" ]] || continue
   patchelf --set-rpath '$ORIGIN' "$bundled_lib"
