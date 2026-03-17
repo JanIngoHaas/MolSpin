@@ -191,6 +191,21 @@ endif()
 add_executable(molspin ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 target_link_libraries(molspin PRIVATE molspin_core)
 
+# Keep lookup of bundled runtime libraries relative to the executable.
+if (APPLE)
+    set_target_properties(molspin PROPERTIES
+        BUILD_RPATH "@loader_path/lib"
+        INSTALL_RPATH "@loader_path/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+elseif (UNIX)
+    set_target_properties(molspin PROPERTIES
+        BUILD_RPATH "\$ORIGIN/lib"
+        INSTALL_RPATH "\$ORIGIN/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
 # Unit tests
 add_executable(molspintest ${SOURCES_TESTS})
 target_link_libraries(molspintest PRIVATE molspin_core)

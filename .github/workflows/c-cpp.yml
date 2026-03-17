@@ -55,7 +55,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libarmadillo-dev libopenblas-dev liblapack-dev
+          sudo apt-get install -y cmake ninja-build patchelf libarmadillo-dev libopenblas-dev liblapack-dev
 
       - name: Install macOS dependencies
         if: matrix.platform == 'macos'
@@ -117,26 +117,21 @@ jobs:
         continue-on-error: true
         run: ctest --test-dir build --output-on-failure --parallel
 
-      - name: Package Unix artifact
-        if: matrix.platform != 'windows'
+      - name: Package Linux artifact
+        if: matrix.platform == 'linux'
         run: |
-          mkdir -p package
-          cp "$(find build -type f -name molspin | head -n 1)" package/molspin
-          cp README.md package/README.md
-          tar -czf "${{ matrix.artifact }}" -C package .
+          ./.github/scripts/package-linux.sh "${{ matrix.artifact }}"
+
+      - name: Package macOS artifact
+        if: matrix.platform == 'macos'
+        run: |
+          ./.github/scripts/package-macos.sh "${{ matrix.artifact }}"
 
       - name: Package Windows artifact
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path package | Out-Null
-          $exe = "build/molspin.exe"
-          if (-not (Test-Path $exe)) {
-            throw "molspin.exe not found at $exe."
-          }
-          Copy-Item $exe package/molspin.exe
-          Copy-Item README.md package/README.md
-          Compress-Archive -Path package/* -DestinationPath "${{ matrix.artifact }}" -Force
+          .github/scripts/package-windows.ps1 -Artifact "${{ matrix.artifact }}" -Triplet "${{ matrix.triplet }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
