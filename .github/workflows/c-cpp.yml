@@ -31,7 +31,7 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             platform: windows
-            triplet: x64-windows
+            triplet: x64-windows-clangcl
             artifact: molspin-windows-x64.zip
 
     steps:
@@ -102,6 +102,8 @@ jobs:
           $overlay = Join-Path (Get-Location) "vcpkg-triplets"
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" `
             -DVCPKG_OVERLAY_TRIPLETS="$overlay" `
