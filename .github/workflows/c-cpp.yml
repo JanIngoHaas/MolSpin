@@ -24,14 +24,6 @@ jobs:
             runner: ubuntu-24.04
             platform: linux
             artifact: molspin-linux-x64.tar.gz
-          - name: Linux arm64
-            runner: ubuntu-24.04-arm
-            platform: linux
-            artifact: molspin-linux-arm64.tar.gz
-          - name: macOS x64
-            runner: macos-15-intel
-            platform: macos
-            artifact: molspin-macos-x64.tar.gz
           - name: macOS arm64
             runner: macos-15
             platform: macos
@@ -39,13 +31,8 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             platform: windows
-            triplet: x64-windows
+            triplet: x64-windows-release
             artifact: molspin-windows-x64.zip
-          - name: Windows arm64
-            runner: windows-11-arm
-            platform: windows
-            triplet: arm64-windows
-            artifact: molspin-windows-arm64.zip
 
     steps:
       - name: Checkout repository
@@ -67,9 +54,10 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          $overlay = Join-Path (Get-Location) "vcpkg-triplets"
           git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP/vcpkg"
           & "$env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
-          & "$env:RUNNER_TEMP/vcpkg/vcpkg.exe" install armadillo openblas lapack --triplet "${{ matrix.triplet }}"
+          & "$env:RUNNER_TEMP/vcpkg/vcpkg.exe" install armadillo openblas --triplet "${{ matrix.triplet }}" --overlay-triplets "$overlay"
           "VCPKG_ROOT=$env:RUNNER_TEMP/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure on Linux
@@ -91,10 +79,12 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          $overlay = Join-Path (Get-Location) "vcpkg-triplets"
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" `
+            -DVCPKG_OVERLAY_TRIPLETS="$overlay" `
             -DMOLSPIN_ENABLE_NATIVE_OPTIMIZATIONS=OFF
 
       - name: Build
