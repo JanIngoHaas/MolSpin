@@ -7,6 +7,7 @@
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <iomanip>
+#include <numeric>
 #include <utility>
 #include "TaskStaticSSSpectra.h"
 #include "Transition.h"

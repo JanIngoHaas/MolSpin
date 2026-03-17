@@ -9,6 +9,7 @@
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <iomanip>
+#include <numeric>
 #include "TaskStaticSSPowderSpectra.h"
 #include "Transition.h"
 #include "Settings.h"

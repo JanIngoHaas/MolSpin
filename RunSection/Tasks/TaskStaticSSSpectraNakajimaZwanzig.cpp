@@ -7,6 +7,7 @@
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <iomanip>
+#include <numeric>
 #include <omp.h>
 #include <memory>
 #include <sstream>

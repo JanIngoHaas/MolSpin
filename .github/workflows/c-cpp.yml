@@ -42,6 +42,15 @@ jobs:
         if: matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Cache vcpkg binary packages
+        if: matrix.platform == 'windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: windows-vcpkg-binaries-${{ matrix.triplet }}-${{ hashFiles('vcpkg-triplets/*.cmake', '.github/workflows/c-cpp.yml') }}
+          restore-keys: |
+            windows-vcpkg-binaries-${{ matrix.triplet }}-
+
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -59,10 +68,17 @@ jobs:
         shell: pwsh
         run: |
           $overlay = Join-Path (Get-Location) "vcpkg-triplets"
-          git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP/vcpkg"
-          & "$env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
-          & "$env:RUNNER_TEMP/vcpkg/vcpkg.exe" install armadillo openblas --triplet "${{ matrix.triplet }}" --overlay-triplets "$overlay"
-          "VCPKG_ROOT=$env:RUNNER_TEMP/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $vcpkgRoot = Join-Path $env:GITHUB_WORKSPACE "vcpkg"
+          $binaryCache = Join-Path $env:GITHUB_WORKSPACE ".vcpkg-cache"
+          New-Item -ItemType Directory -Force -Path $binaryCache | Out-Null
+          if (-not (Test-Path (Join-Path $vcpkgRoot "vcpkg.exe"))) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg $vcpkgRoot
+          }
+          & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
+          $env:VCPKG_DEFAULT_BINARY_CACHE = $binaryCache
+          & (Join-Path $vcpkgRoot "vcpkg.exe") install armadillo openblas --triplet "${{ matrix.triplet }}" --overlay-triplets "$overlay"
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure on Linux
         if: matrix.platform == 'linux'

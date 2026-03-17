@@ -7,6 +7,7 @@
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <iomanip>
+#include <numeric>
 #include "TaskStaticSSPowderSpectraNakajimaZwanzig.h"
 #include "Transition.h"
 #include "Settings.h"
