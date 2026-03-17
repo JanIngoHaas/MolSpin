@@ -6,6 +6,7 @@
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
+#include <numeric>
 #include "TaskStaticSSTimeEvo.h"
 #include "Transition.h"
 #include "Operator.h"
@@ -262,7 +263,7 @@ namespace RunSection
 					{
 						AllWeights[ic][0].push_back((*e)->GetOriWeights());
 						std::vector<double> BL = (*e)->VL();
-						double BMax = std::reduce(BL.begin(), BL.end());
+						double BMax = std::accumulate(BL.begin(), BL.end(), 0.0);
 						BLandSamples[ic].first.push_back(BMax);
 						BLandSamples[ic].second.push_back((*e)->Orientations());
 						SampleSpacing[ic].push_back((*e)->GetSpacing());

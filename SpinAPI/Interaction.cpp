@@ -10,6 +10,7 @@
 #include <memory>
 #include <iostream>
 #include <cmath>
+#include <numeric>
 #include <Spin.h>
 #include "ObjectParser.h"
 #include "Interaction.h"
@@ -1697,7 +1698,7 @@ namespace SpinAPI
 				tau_sum.push_back(std::pow(bondlength, 2));
 			}
 		}
-		tau = std::reduce(tau_sum.begin(), tau_sum.end());
+		tau = std::accumulate(tau_sum.begin(), tau_sum.end(), 0.0);
 		if (tau == 0)
 		{
 			tau = 0;

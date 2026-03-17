@@ -95,6 +95,8 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Run tests
+        id: tests
+        continue-on-error: true
         run: ctest --test-dir build --output-on-failure --parallel
 
       - name: Package Unix artifact
@@ -130,3 +132,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}" --clobber
+
+      - name: Fail job if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "Tests failed. Build artifacts were still packaged and uploaded."
+          exit 1

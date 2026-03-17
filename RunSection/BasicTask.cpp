@@ -10,6 +10,7 @@
 // See LICENSE.txt for license information.
 /////////////////////////////////////////////////////////////////////////
 #include <iostream>
+#include <numeric>
 #include "ObjectParser.h"
 #include "RunSection.h"
 #include "BasicTask.h"
@@ -298,7 +299,7 @@ namespace RunSection
 				{
 					AllWeights[0].push_back((*e)->GetOriWeights());
 					std::vector<double> BL = (*e)->VL();
-					double BMax = std::reduce(BL.begin(), BL.end());
+					double BMax = std::accumulate(BL.begin(), BL.end(), 0.0);
 					BLandSamples.first.push_back(BMax);
 					BLandSamples.second.push_back((*e)->Orientations());
 					SampleSpacing.push_back((*e)->GetSpacing());
