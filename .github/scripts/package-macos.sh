@@ -15,7 +15,8 @@ fi
 cp "$exe" package/molspin
 cp README.md package/README.md
 
-declare -A seen_deps=()
+seen_deps_file="$(mktemp)"
+trap 'rm -f "$seen_deps_file"' EXIT
 
 should_bundle_dep() {
   local dep_name
@@ -58,8 +59,10 @@ bundle_deps() {
     [[ -z "$raw_dep" ]] && continue
     dep_path="$(resolve_dep_path "$raw_dep" || true)"
     [[ -n "$dep_path" && -f "$dep_path" ]] || continue
-    [[ "${seen_deps[$dep_path]:-0}" == 1 ]] && continue
-    seen_deps[$dep_path]=1
+    if grep -Fqx "$dep_path" "$seen_deps_file"; then
+      continue
+    fi
+    printf '%s\n' "$dep_path" >> "$seen_deps_file"
     should_bundle_dep "$dep_path" || continue
     cp "$dep_path" "package/lib/$(basename "$dep_path")"
     bundle_deps "$dep_path"
